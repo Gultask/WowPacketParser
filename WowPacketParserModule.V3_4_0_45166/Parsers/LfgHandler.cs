@@ -131,7 +131,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadBit("RoleCheckComplete", idx);
         }
 
-        [Parser(Opcode.CMSG_DF_GET_SYSTEM_INFO, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.CMSG_DF_GET_SYSTEM_INFO, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleLFGLockInfoRequest(Packet packet)
         {
             packet.ReadBit("Player");
@@ -245,7 +245,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
                 ReadLFGPlayerRewards(packet, i, "LFGPlayerRewards");
         }
 
-        [Parser(Opcode.SMSG_LFG_PROPOSAL_UPDATE, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.SMSG_LFG_PROPOSAL_UPDATE, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleLfgProposalUpdate(Packet packet)
         {
             ReadCliRideTicket(packet);
@@ -327,7 +327,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadBits("Reason", 4);
         }
 
-        [Parser(Opcode.SMSG_LFG_UPDATE_STATUS, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.SMSG_LFG_UPDATE_STATUS, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleLfgUpdateStatus(Packet packet)
         {
             ReadCliRideTicket(packet);
@@ -369,7 +369,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadBit("Vote");
         }
 
-        [Parser(Opcode.CMSG_DF_JOIN, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.CMSG_DF_JOIN, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleDFJoin(Packet packet)
         {
             packet.ReadBit("QueueAsGroup");
@@ -393,7 +393,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             ReadCliRideTicket(packet, "RideTicket");
         }
 
-        [Parser(Opcode.CMSG_DF_PROPOSAL_RESPONSE, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.CMSG_DF_PROPOSAL_RESPONSE, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleDFProposalResponse(Packet packet)
         {
             ReadCliRideTicket(packet);

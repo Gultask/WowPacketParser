@@ -120,7 +120,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
                 ReadCurrenciesData(packet, i, "Currencies");
         }
 
-        [Parser(Opcode.SMSG_LOOT_ROLL, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.SMSG_LOOT_ROLL, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleLootRollServer(Packet packet)
         {
             packet.ReadPackedGuid128("LootObj");
@@ -164,7 +164,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
                 packet.ReadPackedGuid128("Player", i);
         }
 
-        [Parser(Opcode.SMSG_START_LOOT_ROLL, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.SMSG_START_LOOT_ROLL, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleLootStartRoll(Packet packet)
         {
             packet.ReadPackedGuid128("LootObj");
@@ -195,7 +195,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadBit("IsSoftInteract");
         }
 
-        [Parser(Opcode.CMSG_LOOT_MONEY, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.CMSG_LOOT_MONEY, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleLootMoney(Packet packet)
         {
             packet.ReadBit("IsSoftInteract");

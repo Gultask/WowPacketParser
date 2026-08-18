@@ -1178,7 +1178,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             }
         }
 
-        [Parser(Opcode.CMSG_QUEST_POI_QUERY, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.CMSG_QUEST_POI_QUERY, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleQuestPOIQuery(Packet packet)
         {
             packet.ReadUInt32("MissingQuestCount");
@@ -1337,7 +1337,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadWoWString("ReasonText", len);
         }
 
-        [Parser(Opcode.SMSG_QUEST_GIVER_OFFER_REWARD_MESSAGE, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.SMSG_QUEST_GIVER_OFFER_REWARD_MESSAGE, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void QuestGiverOfferReward(Packet packet)
         {
             QuestOfferReward questOfferReward;

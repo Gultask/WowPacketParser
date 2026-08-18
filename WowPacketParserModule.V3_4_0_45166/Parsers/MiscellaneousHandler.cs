@@ -1086,7 +1086,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadBits("Tier", 3);
         }
 
-        [Parser(Opcode.SMSG_SET_CURRENCY, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.SMSG_SET_CURRENCY, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleSetCurrency(Packet packet)
         {
             packet.ReadInt32("Type");
@@ -1349,7 +1349,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
                 packet.ReadInt32E<Tutorial>("TutorialBit");
         }
 
-        [Parser(Opcode.CMSG_WHO, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.CMSG_WHO, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleWhoRequest(Packet packet)
         {
             var areaCount = packet.ReadBits(4);

@@ -328,7 +328,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
         {
         }
 
-        [Parser(Opcode.SMSG_REQUEST_PVP_REWARDS_RESPONSE, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.SMSG_REQUEST_PVP_REWARDS_RESPONSE, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleRequestPVPRewardsResponse(Packet packet)
         {
             LfgHandler.ReadLfgPlayerQuestReward(packet, "FirstRandomBGWinRewards");
@@ -375,7 +375,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadBit("RatedBattlegroundBlitz");
         }
 
-        [Parser(Opcode.SMSG_RATED_PVP_INFO, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.SMSG_RATED_PVP_INFO, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleRatedPvPInfo(Packet packet)
         {
             for (int i = 0; i < 9; i++)

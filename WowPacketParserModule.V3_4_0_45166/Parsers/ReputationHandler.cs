@@ -80,7 +80,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadInt32("FactionID", indexes);
         }
 
-        [Parser(Opcode.SMSG_SET_FACTION_STANDING, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.SMSG_SET_FACTION_STANDING, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleSetFactionStanding(Packet packet)
         {
             packet.ReadSingle("BonusFromAchievementSystem");

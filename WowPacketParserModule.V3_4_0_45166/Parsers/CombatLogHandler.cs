@@ -16,7 +16,10 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadInt16("PlayerLevelDelta", idx);
             packet.ReadSByte("TargetScalingLevelDelta", idx);
             packet.ReadUInt16("PlayerItemlevel", idx);
-            packet.ReadUInt16("TargetItemLevel", idx);
+            if (ClientVersion.AddedInVersion(ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505))
+                packet.ReadUInt32("TargetItemLevel", idx);
+            else
+                packet.ReadUInt16("TargetItemLevel", idx);
             packet.ReadByte("ScalesWithItemLevel", idx);
         }
 
@@ -26,7 +29,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
 
             packet.ReadUInt16("PlayerItemLevel", idx);
             packet.ReadInt16("PlayerLevelDelta", idx);
-            if (ClientVersion.AddedInVersion(ClientVersionBuild.V3_4_4_59817))
+            if (ClientVersion.AddedInVersion(ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505))
                 packet.ReadUInt32("TargetItemLevel", idx);
             else
                 packet.ReadUInt16("TargetItemLevel", idx);
@@ -274,7 +277,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             ReadAttackRoundInfo344(packet, "AttackRoundInfo");
         }
 
-        [Parser(Opcode.SMSG_SPELL_PERIODIC_AURA_LOG, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.SMSG_SPELL_PERIODIC_AURA_LOG, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleSpellPeriodicAuraLog720(Packet packet)
         {
             packet.ReadPackedGuid128("TargetGUID");

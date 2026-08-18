@@ -115,7 +115,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadUInt32("EnchantSlot");
         }
 
-        [Parser(Opcode.SMSG_INVENTORY_CHANGE_FAILURE, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.SMSG_INVENTORY_CHANGE_FAILURE, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleInventoryChangeFailure(Packet packet)
         {
             var result = packet.ReadInt32E<InventoryResult440>("BagResult");
@@ -251,7 +251,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadUInt32<SpellId>("SpellID");
         }
 
-        [Parser(Opcode.SMSG_SELL_RESPONSE, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.SMSG_SELL_RESPONSE, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleSellResponse(Packet packet)
         {
             packet.ReadPackedGuid128("VendorGUID");
