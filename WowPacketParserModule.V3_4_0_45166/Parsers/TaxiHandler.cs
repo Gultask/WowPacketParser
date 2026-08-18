@@ -13,7 +13,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadBitsE<TaxiError>("Result", 4);
         }
 
-        [Parser(Opcode.SMSG_SHOW_TAXI_NODES, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.SMSG_SHOW_TAXI_NODES, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleShowTaxiNodes(Packet packet)
         {
             var hasWindowInfo = packet.ReadBit("HasWindowInfo");

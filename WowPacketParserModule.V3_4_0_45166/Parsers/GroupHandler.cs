@@ -120,7 +120,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
                 packet.ReadInt32("LfgSlots", i);
         }
 
-        [Parser(Opcode.SMSG_PARTY_MEMBER_FULL_STATE, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.SMSG_PARTY_MEMBER_FULL_STATE, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandlePartyMemberFullState(Packet packet)
         {
             packet.ReadBit("ForEnemy");
@@ -420,7 +420,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
                 packet.ReadByte("PartyIndex");
         }
 
-        [Parser(Opcode.CMSG_REQUEST_PARTY_JOIN_UPDATES, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.CMSG_REQUEST_PARTY_JOIN_UPDATES, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleRequestPartyJoinUpdates(Packet packet)
         {
             var hasPartyIndex = packet.ReadBit("HasPartyIndex");
@@ -429,7 +429,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
                 packet.ReadByte("PartyIndex");
         }
 
-        [Parser(Opcode.CMSG_REQUEST_PARTY_MEMBER_STATS, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.CMSG_REQUEST_PARTY_MEMBER_STATS, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleRequestPartyMemberStats(Packet packet)
         {
             var hasPartyIndex = packet.ReadBit("HasPartyIndex");

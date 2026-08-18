@@ -390,7 +390,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadPackedGuid128("StableMaster");
         }
 
-        [Parser(Opcode.SMSG_PET_DISMISS_SOUND, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.SMSG_PET_DISMISS_SOUND, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandlePetDismissSound(Packet packet)
         {
             packet.ReadPackedGuid128("UnitGUID");

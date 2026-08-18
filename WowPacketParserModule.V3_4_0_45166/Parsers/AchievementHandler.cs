@@ -123,14 +123,14 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadInt32("CriteriaID");
         }
 
-        [Parser(Opcode.SMSG_RESPOND_INSPECT_ACHIEVEMENTS, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.SMSG_RESPOND_INSPECT_ACHIEVEMENTS, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleRespondInspectAchievements(Packet packet)
         {
             packet.ReadPackedGuid128("Player");
             ReadAllAchievements(packet, "Data");
         }
 
-        [Parser(Opcode.CMSG_QUERY_INSPECT_ACHIEVEMENTS, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.CMSG_QUERY_INSPECT_ACHIEVEMENTS, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleQueryInspectAchievements(Packet packet)
         {
             packet.ReadPackedGuid128("Player");

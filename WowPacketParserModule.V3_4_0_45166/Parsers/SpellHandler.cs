@@ -938,7 +938,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
                 packet.ReadUInt16("Talent");
         }
 
-        [Parser(Opcode.SMSG_MIRROR_IMAGE_COMPONENTED_DATA, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.SMSG_MIRROR_IMAGE_COMPONENTED_DATA, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleMirrorImageData(Packet packet)
         {
             packet.ReadPackedGuid128("UnitGUID");
@@ -1127,7 +1127,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadInt32("Delay");
         }
 
-        [Parser(Opcode.SMSG_SUPERCEDED_SPELLS, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.SMSG_SUPERCEDED_SPELLS, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleSupercededSpells(Packet packet)
         {
             var spellCount = packet.ReadUInt32();
@@ -1194,7 +1194,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadByte("RespecType");
         }
 
-        [Parser(Opcode.CMSG_GET_MIRROR_IMAGE_DATA, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.CMSG_GET_MIRROR_IMAGE_DATA, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleGetMirrorImageData(Packet packet)
         {
             packet.ReadPackedGuid128("UnitGUID");
@@ -1207,7 +1207,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadUInt16("OverrideID");
         }
 
-        [Parser(Opcode.CMSG_LEARN_PREVIEW_TALENTS, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.CMSG_LEARN_PREVIEW_TALENTS, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandleLearnPreviewTalents(Packet packet)
         {
             var talentCount = packet.ReadUInt32("TalentCount");
@@ -1229,7 +1229,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadVector3("CollisionPos");
         }
 
-        [Parser(Opcode.CMSG_PET_CAST_SPELL, ClientVersionBuild.V3_4_4_59817)]
+        [Parser(Opcode.CMSG_PET_CAST_SPELL, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
         public static void HandlePetCastSpell(Packet packet)
         {
             packet.ReadPackedGuid128("PetGUID");
