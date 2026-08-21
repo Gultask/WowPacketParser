@@ -59,6 +59,8 @@ namespace WowPacketParser.Misc
         public static readonly string Username = Conf.GetString("Username", "root");
         public static readonly string Password = Conf.GetString("Password", string.Empty);
         public static readonly string WPPDatabase = Conf.GetString("WPPDatabase", "WPP");
+        public static readonly string IngestDatabase = Conf.GetString("IngestDatabase", "wpp_ingest");
+        public static readonly ClientType IngestMaxContentExpansion = GetIngestMaxContentExpansion();
         public static readonly string TDBDatabase = Conf.GetString("TDBDatabase", "world");
         public static readonly string HotfixesDatabase = Conf.GetString("HotfixesDatabase", "hotfixes");
         public static readonly string CharacterSet = Conf.GetString("CharacterSet", "utf8");
@@ -69,6 +71,25 @@ namespace WowPacketParser.Misc
         public static readonly string HotfixCachePath = Conf.GetString("HotfixCachePath", $@"\cache\DBCache.bin");
         public static readonly bool UseDBC = Conf.GetBoolean("UseDBC", false);
         public static readonly bool ParseSpellInfos = Conf.GetBoolean("ParseSpellInfos", false);
+
+        /// <summary>
+        /// Conf.GetEnum only understands integers, and a filter that quietly turns itself off
+        /// because of a typo is worse than no filter, so the name is parsed here and a bad
+        /// value stops the run instead of letting everything through.
+        /// </summary>
+        private static ClientType GetIngestMaxContentExpansion()
+        {
+            var value = Conf.GetString("IngestMaxContentExpansion", string.Empty).Trim();
+            if (string.IsNullOrEmpty(value))
+                return ClientType.Current;
+
+            if (Enum.TryParse<ClientType>(value, true, out var parsed) && Enum.IsDefined(typeof(ClientType), parsed))
+                return parsed;
+
+            throw new ArgumentException(
+                $"IngestMaxContentExpansion '{value}' is not a ClientType. Use a name such as " +
+                "WrathOfTheLichKing, Cataclysm or MistsOfPandaria, or leave it empty for no limit.");
+        }
 
         private static UInt128 GetSQLOutputFlag()
         {
@@ -90,7 +111,8 @@ namespace WowPacketParser.Misc
         {
             return DumpFormat != DumpFormatType.SqlOnly &&
                    DumpFormat != DumpFormatType.SniffDataOnly &&
-                   DumpFormat != DumpFormatType.UniversalProto;
+                   DumpFormat != DumpFormatType.UniversalProto &&
+                   DumpFormat != DumpFormatType.Database;
         }
 
         public static bool DumpFormatWithTextToFile()
@@ -98,7 +120,8 @@ namespace WowPacketParser.Misc
             return DumpFormat != DumpFormatType.SqlOnly &&
                    DumpFormat != DumpFormatType.SniffDataOnly &&
                    DumpFormat != DumpFormatType.UniversalProto &&
-                   DumpFormat != DumpFormatType.UniversalProtoWithText;
+                   DumpFormat != DumpFormatType.UniversalProtoWithText &&
+                   DumpFormat != DumpFormatType.Database;
         }
 
         public static bool DumpFormatWithSQL()

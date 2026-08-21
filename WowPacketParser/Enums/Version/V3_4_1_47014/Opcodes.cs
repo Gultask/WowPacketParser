@@ -40,6 +40,7 @@ namespace WowPacketParser.Enums.Version.V3_4_1_47014
             { Opcode.SMSG_GOSSIP_COMPLETE, 0x2A97 },
             { Opcode.SMSG_GOSSIP_MESSAGE, 0x2A98 },
             { Opcode.SMSG_PET_SPELLS_MESSAGE, 0x2C25 },
+            { Opcode.SMSG_LOOT_RESPONSE, 0x2616 },
         };
 
         private static readonly BiDictionary<Opcode, int> MiscOpcodes = new BiDictionary<Opcode, int>();

@@ -1,37 +1,49 @@
-﻿using WowPacketParser.Enums;
+using WowPacketParser.Enums;
 using WowPacketParser.Misc;
+using WowPacketParser.Store;
+using WowPacketParser.Store.Objects;
 using WowPacketParser.Parsing;
 
 namespace WowPacketParserModule.V7_0_3_22248.Parsers
 {
     public static class LootHandler
     {
-        public static void ReadLootItem(Packet packet, params object[] indexes)
+        public static LootInstanceItemRecord ReadLootItem(Packet packet, params object[] indexes)
         {
             packet.ResetBitReader();
 
             packet.ReadBits("ItemType", 2, indexes);
-            packet.ReadBits("ItemUiType", 3, indexes);
+            var uiType = packet.ReadBits("ItemUiType", 3, indexes);
             packet.ReadBit("CanTradeToTapList", indexes);
 
-            Substructures.ItemHandler.ReadItemInstance(packet, indexes, "ItemInstance");
+            var instance = Substructures.ItemHandler.ReadItemInstance(packet, indexes, "ItemInstance");
 
-            packet.ReadUInt32("Quantity", indexes);
-            packet.ReadByte("LootItemType", indexes);
-            packet.ReadByte("LootListID", indexes);
+            var quantity = packet.ReadUInt32("Quantity", indexes);
+            var lootItemType = packet.ReadByte("LootItemType", indexes);
+            var slot = packet.ReadByte("LootListID", indexes);
+
+            return new LootInstanceItemRecord
+            {
+                Slot = slot,
+                ItemId = instance?.ItemID ?? 0,
+                Quantity = quantity,
+                UiType = (int)uiType,
+                RandomPropertiesId = instance?.RandomPropertiesID ?? 0,
+                LootItemType = lootItemType
+            };
         }
 
         [Parser(Opcode.SMSG_LOOT_RESPONSE)]
         public static void HandleLootResponse(Packet packet)
         {
-            packet.ReadPackedGuid128("Owner");
-            packet.ReadPackedGuid128("LootObj");
+            var owner = packet.ReadPackedGuid128("Owner");
+            var lootObj = packet.ReadPackedGuid128("LootObj");
             packet.ReadByteE<LootError>("FailureReason");
-            packet.ReadByteE<LootType>("AcquireReason");
-            packet.ReadByteE<LootMethod>("LootMethod");
-            packet.ReadByteE<ItemQuality>("Threshold");
+            var acquireReason = packet.ReadByteE<LootType>("AcquireReason");
+            var lootMethod = packet.ReadByteE<LootMethod>("LootMethod");
+            var threshold = packet.ReadByteE<ItemQuality>("Threshold");
 
-            packet.ReadUInt32("Coins");
+            var coins = packet.ReadUInt32("Coins");
 
             var itemCount = packet.ReadUInt32("ItemCount");
             var currencyCount = packet.ReadUInt32("CurrencyCount");
@@ -43,8 +55,26 @@ namespace WowPacketParserModule.V7_0_3_22248.Parsers
             if (ClientVersion.RemovedInVersion(ClientVersionBuild.V7_2_0_23826))
                 packet.ReadBit("PersonalLooting");
 
+            // An instance with no items and no coins is kept: it is the denominator for every
+            // drop chance worked out from this data.
+            var record = new LootInstanceRecord
+            {
+                OwnerGuid = owner == null ? null : $"0x{owner.High:X16}{owner.Low:X16}",
+                LootObjectGuid = lootObj == null ? null : $"0x{lootObj.High:X16}{lootObj.Low:X16}",
+                AcquireReason = (int)acquireReason,
+                AcquireReasonName = acquireReason.ToString(),
+                LootMethod = (int)lootMethod,
+                LootMethodName = lootMethod.ToString(),
+                Threshold = (int)threshold,
+                Coins = coins,
+                ItemCount = (int)itemCount,
+                SeenUtc = packet.Time
+            };
+
             for (var i = 0; i < itemCount; ++i)
-                ReadLootItem(packet, i, "LootItem");
+                record.Items.Add(ReadLootItem(packet, i, "LootItem"));
+
+            Storage.LootInstances.Add(record);
 
             for (var i = 0; i < currencyCount; ++i)
                 V6_0_2_19033.Parsers.LootHandler.ReadCurrenciesData(packet, i, "Currencies");

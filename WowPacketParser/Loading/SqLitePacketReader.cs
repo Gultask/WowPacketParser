@@ -48,6 +48,8 @@ namespace WowPacketParser.Loading
 
         #region Public Methods and Operators
 
+        public SniffMetadata Metadata => new SniffMetadata();
+
         public bool CanRead()
         {
             return _reader.Read();

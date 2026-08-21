@@ -1,5 +1,7 @@
 using WowPacketParser.Enums;
 using WowPacketParser.Misc;
+using WowPacketParser.Store;
+using WowPacketParser.Store.Objects;
 using WowPacketParser.Parsing;
 
 namespace WowPacketParserModule.V3_4_0_45166.Parsers
@@ -181,6 +183,11 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadInt32("PingRestriction");
 
             var playerCount = packet.ReadUInt32("PlayerListCount");
+
+            // Timestamped rather than kept as a running flag: packets are parsed in parallel, so
+            // whether the player was grouped when a given corpse was looted has to be worked out
+            // afterwards from these events.
+            Storage.PartyStates.Add(new PartyStateRecord { Time = packet.Time, PlayerCount = (int)playerCount });
             var hasLFG = packet.ReadBit("HasLfgInfo");
             var hasLootSettings = packet.ReadBit("HasLootSettings");
             var hasDifficultySettings = packet.ReadBit("HasDifficultySettings");

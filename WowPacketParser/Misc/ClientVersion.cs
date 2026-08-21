@@ -1890,6 +1890,28 @@ namespace WowPacketParser.Misc
 
         public static ClientBranch Branch => _branch;
 
+        /// <summary>
+        /// Which expansion's world this client shows, as opposed to how new the client is.
+        /// A Wrath Classic client is build 51505 and a Cataclysm client is build 15595, so
+        /// build numbers cannot be compared across branches - Wrath Classic is 3.x content
+        /// however high its build climbs. Only the retail line is ordered by build.
+        /// </summary>
+        public static ClientType ContentExpansion
+        {
+            get
+            {
+                switch (_branch)
+                {
+                    case ClientBranch.Classic: return ClientType.WorldOfWarcraft;
+                    case ClientBranch.TBC:     return ClientType.TheBurningCrusade;
+                    case ClientBranch.WotLK:   return ClientType.WrathOfTheLichKing;
+                    case ClientBranch.Cata:    return ClientType.Cataclysm;
+                    case ClientBranch.MoP:     return ClientType.MistsOfPandaria;
+                    default:                   return Expansion;
+                }
+            }
+        }
+
         private static ClientBranch GetBranch(ClientVersionBuild build)
         {
             if (IsClassicVanillaClientVersionBuild(build) || IsClassicSeasonOfMasteryClientVersionBuild(build) || IsClassicHardcoreClientVersionBuild(build) || IsSeasonOfDiscoveryClientVersionBuild(build))

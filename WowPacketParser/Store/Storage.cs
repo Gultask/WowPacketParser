@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using WowPacketParser.Enums;
 using WowPacketParser.Misc;
@@ -16,6 +16,11 @@ namespace WowPacketParser.Store
 
         // Units, GameObjects, Players, Items
         public static readonly StoreDictionary<WowGuid, WoWObject> Objects = new StoreDictionary<WowGuid, WoWObject>(new List<SQLOutput>());
+
+        // Written straight from the loot and group handlers, which run in parallel, so these are
+        // concurrent and unordered - every entry carries its own timestamp instead.
+        public static readonly System.Collections.Concurrent.ConcurrentBag<LootInstanceRecord> LootInstances = new();
+        public static readonly System.Collections.Concurrent.ConcurrentBag<PartyStateRecord> PartyStates = new();
 
         /* Key: Entry */
 
@@ -2660,6 +2665,9 @@ namespace WowPacketParser.Store
             SniffData.Clear();
 
             Objects.Clear();
+
+            LootInstances.Clear();
+            PartyStates.Clear();
 
             AreaTriggerCreatePropertiesOrbits.Clear();
             AreaTriggerCreatePropertiesPolygonVertices.Clear();

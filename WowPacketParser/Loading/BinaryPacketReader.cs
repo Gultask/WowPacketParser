@@ -30,6 +30,17 @@ namespace WowPacketParser.Loading
         private uint _startTickCount;
         private int _snifferId;
         private short _snifferVersion;
+        private int _utcTimeOffsetSeconds;
+        private bool _utcTimeOffsetKnown;
+
+        public SniffMetadata Metadata => new SniffMetadata
+        {
+            SnifferId = _snifferId,
+            SnifferVersion = _snifferVersion,
+            PktVersion = _pktVersion.ToString(),
+            HeaderStartTimeUtc = _startTime == default ? null : DateTime.SpecifyKind(_startTime, DateTimeKind.Utc),
+            UtcTimeOffsetSeconds = _utcTimeOffsetKnown ? _utcTimeOffsetSeconds : null
+        };
 
         public BinaryPacketReader(SniffType type, string fileName, Encoding encoding)
         {
@@ -119,8 +130,11 @@ namespace WowPacketParser.Loading
                         if (ClientVersion.Build == ClientVersionBuild.Zero && _snifferVersion == 0x0102)
                             SetBuild(65560);
 
-                        if (_snifferVersion >= 0x0103)
-                            Packet.UtcTimeOffset = BitConverter.ToInt32(optionalData, 2);
+                        if (_snifferVersion >= 0x0103 && additionalLength >= 6)
+                        {
+                            _utcTimeOffsetSeconds = BitConverter.ToInt32(optionalData, 2);
+                            _utcTimeOffsetKnown = true;
+                        }
                     }
                     break;
                 }
@@ -216,7 +230,6 @@ namespace WowPacketParser.Loading
                             var tickCount = _reader.ReadUInt32();
                             time = _startTime.AddMilliseconds(tickCount - _startTickCount);
                             time = DateTime.SpecifyKind(time, DateTimeKind.Utc);
-                            time = TimeZoneInfo.ConvertTimeFromUtc(time, TimeZoneInfo.Local);
                         }
 
                         int additionalSize = _reader.ReadInt32();
@@ -245,7 +258,6 @@ namespace WowPacketParser.Loading
                             var unixMilliseconds = _reader.ReadDouble();
                             time = DateTime.UnixEpoch.AddMilliseconds(unixMilliseconds);
                             time = DateTime.SpecifyKind(time, DateTimeKind.Utc);
-                            time = TimeZoneInfo.ConvertTimeFromUtc(time, TimeZoneInfo.Local);
                             if (_snifferVersion >= 0x101)
                             {
                                 var commentLength = _reader.ReadByte();
