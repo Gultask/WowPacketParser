@@ -160,7 +160,7 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
         {
             ObjectType objType = ObjectTypeConverter.Convert(packet.ReadByteE<ObjectType801>("Object Type", index));
 
-            WoWObject obj = CoreParsers.UpdateHandler.CreateObject(objType, guid, map);
+            WoWObject obj = CoreParsers.UpdateHandler.CreateObject(objType, guid, map, packet);
 
             obj.CreateType = createType;
             obj.Movement = ReadMovementUpdateBlock(packet, guid, obj, index);
@@ -255,7 +255,7 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
         {
             ObjectType objType = ObjectTypeConverter.Convert(packet.ReadByteE<ObjectType801>("Object Type", index));
 
-            WoWObject obj = CoreParsers.UpdateHandler.CreateObject(objType, guid, map);
+            WoWObject obj = CoreParsers.UpdateHandler.CreateObject(objType, guid, map, packet);
 
             obj.CreateType = createType;
             obj.Movement = ReadMovementUpdateBlock(packet, guid, obj, index);

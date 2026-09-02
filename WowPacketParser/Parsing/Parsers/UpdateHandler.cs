@@ -84,7 +84,7 @@ namespace WowPacketParser.Parsing.Parsers
         private static void ReadCreateObjectBlock(Packet packet, CreateObject createObject, WowGuid guid, uint map, CreateObjectType createType, object index)
         {
             ObjectType objType = ObjectTypeConverter.Convert(packet.ReadByteE<ObjectTypeLegacy>("Object Type", index));
-            WoWObject obj = CreateObject(objType, guid, map);
+            WoWObject obj = CreateObject(objType, guid, map, packet);
 
             obj.CreateType = createType;
             obj.Movement = ReadMovementUpdateBlock(packet, guid, index);
@@ -105,7 +105,7 @@ namespace WowPacketParser.Parsing.Parsers
                 packet.AddSniffData(Utilities.ObjectTypeToStore(objType), (int)guid.GetEntry(), "SPAWN");
         }
 
-        public static WoWObject CreateObject(ObjectType objType, WowGuid guid, uint map)
+        public static WoWObject CreateObject(ObjectType objType, WowGuid guid, uint map, Packet packet = null)
         {
             WoWObject obj = objType switch
             {
@@ -128,6 +128,12 @@ namespace WowPacketParser.Parsing.Parsers
             obj.Phases = new HashSet<ushort>(MovementHandler.ActivePhases.Select(kvp => kvp.Key) /*copy using enumerator that doesn't lock ConcurrentDictionary*/);
             obj.DifficultyID = MovementHandler.CurrentDifficultyID;
 
+            if (packet != null)
+            {
+                obj.PacketNumber = packet.Number;
+                obj.PacketTime = packet.Time;
+            }
+
             return obj;
         }
 
@@ -147,16 +153,22 @@ namespace WowPacketParser.Parsing.Parsers
             obj.EntityFragments = newObj.EntityFragments;
             if (guid.GetHighType() == HighGuidType.Creature) // skip if not an unit
             {
-                // sometimes CreateObject2 is sent after CreateObject1 for the same guid
-                // in those cases orientation of CreateObject1 is 0, so we force the 2nd orientation
-                if (newObj.CreateType == CreateObjectType.Spawn && obj.Movement.Position.Equals(newObj.Movement.Position))
+                // has to be sampled before a CreateObject2 overwrites the stored position below
+                var moved = obj.Movement.Position != newObj.Movement.Position;
+
+                // sometimes CreateObject2 is sent after CreateObject1 for the same guid.
+                // the CreateObject2 is the authoritative spawn point, so take its position and
+                // orientation even when the creature moved since the CreateObject1 sighting
+                // (orientation of CreateObject1 is 0 in those cases anyway)
+                if (newObj.CreateType == CreateObjectType.Spawn && obj.CreateType != CreateObjectType.Spawn)
                 {
                     obj.CreateType = CreateObjectType.Spawn;
+                    obj.Movement.Position = newObj.Movement.Position;
                     obj.Movement.Orientation = newObj.Movement.Orientation;
                 }
 
                 if (!obj.Movement.HasWpsOrRandMov)
-                    if (obj.Movement.Position != newObj.Movement.Position)
+                    if (moved)
                         if (((obj as Unit).UnitData.Flags & (uint) UnitFlags.IsInCombat) == 0) // movement could be because of aggro so ignore that
                             obj.Movement.HasWpsOrRandMov = true;
             }

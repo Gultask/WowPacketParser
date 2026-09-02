@@ -63,7 +63,7 @@ namespace WowPacketParserModule.V5_3_0_16981.Parsers
         private static void ReadCreateObjectBlock(Packet packet, CreateObject createObject, WowGuid guid, uint map, CreateObjectType createType, object index)
         {
             ObjectType objType = ObjectTypeConverter.Convert(packet.ReadByteE<ObjectTypeLegacy>("Object Type", index));
-            WoWObject obj = CoreParsers.UpdateHandler.CreateObject(objType, guid, map);
+            WoWObject obj = CoreParsers.UpdateHandler.CreateObject(objType, guid, map, packet);
 
             obj.CreateType = createType;
             obj.Movement = ReadMovementUpdateBlock(packet, guid, index);

@@ -166,7 +166,7 @@ namespace WowPacketParserModule.V8_0_1_27101.Parsers
             if (ClientVersion.RemovedInVersion(ClientVersionBuild.V8_1_0_28724))
                 packet.ReadInt32("HeirFlags", index);
 
-            WoWObject obj = CoreParsers.UpdateHandler.CreateObject(objType, guid, map);
+            WoWObject obj = CoreParsers.UpdateHandler.CreateObject(objType, guid, map, packet);
 
             obj.CreateType = createType;
             obj.Movement = ReadMovementUpdateBlock(packet, createObject, guid, obj, index);

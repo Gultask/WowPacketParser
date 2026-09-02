@@ -37,9 +37,6 @@ namespace WowPacketParser.Store.Objects
         [DBFieldName("PhaseGroup", TargetedDatabaseFlag.SinceCataclysm | TargetedDatabaseFlag.AnyClassic)]
         public int? PhaseGroup;
 
-        [DBFieldName("modelid")]
-        public uint? ModelID;
-
         [DBFieldName("equipment_id")]
         public int EquipmentID;
 
@@ -61,37 +58,22 @@ namespace WowPacketParser.Store.Objects
         [DBFieldName("wander_distance")]
         public float? WanderDistance;
 
-        [DBFieldName("currentwaypoint")]
-        public uint? CurrentWaypoint;
-
-        [DBFieldName("curhealth", TargetedDatabaseFlag.TillShadowlands)]
-        public uint? CurHealth;
-
         [DBFieldName("curHealthPct", TargetedDatabaseFlag.Dragonflight | TargetedDatabaseFlag.WotlkClassic | TargetedDatabaseFlag.CataClassic)]
         public uint? CurHealthPct;
-
-        [DBFieldName("curmana", TargetedDatabaseFlag.TillShadowlands)]
-        public uint? CurMana;
 
         [DBFieldName("MovementType")]
         public uint? MovementType;
 
-        [DBFieldName("npcflag", false, false, true)]
-        public uint? NpcFlag;
-
-        [DBFieldName("unit_flags", false, false, true)]
-        public uint? UnitFlags;
-
-        [DBFieldName("unit_flags2", false, false, true)]
-        public uint? UnitFlags2;
-
         [DBFieldName("unit_flags3", TargetedDatabaseFlag.SinceLegion | TargetedDatabaseFlag.AnyClassic, false, false, true)]
         public uint? UnitFlags3;
 
-        [DBFieldName("dynamicflags", TargetedDatabaseFlag.TillShadowlands | TargetedDatabaseFlag.Classic | TargetedDatabaseFlag.WotlkClassic)]
-        public uint? DynamicFlag;
+        [DBFieldName("CreateObject")]
+        public uint? CreateObject;
 
         [DBFieldName("VerifiedBuild")]
         public int? VerifiedBuild = ClientVersion.BuildInt;
+
+        [DBFieldName("Comment", false, false, true)]
+        public string Comment;
     }
 }

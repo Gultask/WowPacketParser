@@ -26,3 +26,5 @@ cov-int
 
 # Rider
 .idea
+/scripts/__pycache__
+/scripts/.paths/

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using WowPacketParser.Enums;
@@ -13,6 +14,10 @@ namespace WowPacketParser.Store.Objects
         public WowGuid Guid;
         public ObjectType Type;
         public CreateObjectType CreateType;
+
+        // Packet that first created this object, used to group spawns by their source update packet
+        public int PacketNumber;
+        public DateTime PacketTime;
 
         public MovementInfo Movement;
 

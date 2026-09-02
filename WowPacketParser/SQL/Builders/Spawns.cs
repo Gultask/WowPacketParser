@@ -133,6 +133,9 @@ namespace WowPacketParser.SQL.Builders
                 ? units.Values.GroupBy(u => u, new SpawnComparer()).Select(x => x.First())
                 : units.Values.ToList();
 
+            // keep creatures created by the same SMSG_UPDATE_OBJECT together in the output
+            unitList = unitList.OrderBy(u => u.PacketTime).ThenBy(u => u.PacketNumber).ToList();
+
 
             if (!Settings.SaveExistingSpawns && SQLConnector.Enabled)
             {
@@ -237,6 +240,11 @@ namespace WowPacketParser.SQL.Builders
                         row.Data.EquipmentID = (int)equip.ID;
                 }
 
+                // no matching creature_equip_template row, but the sniff shows the spawn wearing something
+                if (row.Data.EquipmentID == 0 && creature.UnitData.VirtualItems != null &&
+                    creature.UnitData.VirtualItems.Any(item => item != null && item.ItemID.GetValueOrDefault(0) != 0))
+                    row.Data.EquipmentID = 1;
+
                 if (!creature.IsOnTransport())
                 {
                     row.Data.PositionX = creature.Movement.Position.X;
@@ -267,16 +275,9 @@ namespace WowPacketParser.SQL.Builders
 
                 // set some defaults
                 row.Data.PhaseGroup = 0;
-                row.Data.ModelID = 0;
-                row.Data.CurrentWaypoint = 0;
-                row.Data.CurHealth = (uint)creature.UnitData.MaxHealth;
                 row.Data.CurHealthPct = 100;
-                row.Data.CurMana = (uint)creature.UnitData.MaxPower[0];
-                row.Data.NpcFlag = null;
-                row.Data.UnitFlags = null;
-                row.Data.UnitFlags2 = null;
                 row.Data.UnitFlags3 = null;
-                row.Data.DynamicFlag = 0;
+                row.Data.CreateObject = creature.CreateType == CreateObjectType.Spawn ? 2u : 1u;
 
                 if (creature.UnitData.Health > 1 && (creature.UnitData.Flags & (uint)UnitFlags.IsInCombat) == 0)
                     row.Data.CurHealthPct = (uint)(creature.UnitData.Health / creature.UnitData.MaxHealth * 100);
@@ -285,6 +286,8 @@ namespace WowPacketParser.SQL.Builders
                 row.Comment += " (Area: " + StoreGetters.GetName(StoreNameType.Area, creature.Area, false) + " - ";
                 row.Comment += "Difficulty: " + StoreGetters.GetName(StoreNameType.Difficulty, ((int?)creature.DifficultyID) ?? 0, false) + ")";
                 row.Comment += creature.CreateType == CreateObjectType.Spawn ? " CreateObject2" : " CreateObject1";
+                if (creature.PacketTime != default)
+                    row.Comment += $" (Packet: {creature.PacketNumber} - {creature.PacketTime:yyyy-MM-dd HH:mm:ss})";
 
                 string auras = string.Empty;
                 string commentAuras = string.Empty;
