@@ -41,7 +41,7 @@ The two arrows that matter:
 ### 1. Ingest
 
 ```
-.\ingest-sniffs.ps1 -Path 'G:\sniff-storage' -LogFile 'G:\ingest.log'
+.\ingest-sniffs.ps1 -Path 'G:\sniff-storage' -Database wpp_ingest2 -MapPolicy wotlk -Threads 4 -LogFile 'G:\ingest.log'
 ```
 
 Walks folders for `.pkt` and archives, runs WowPacketParser with DumpFormat 17 (straight to
@@ -49,7 +49,72 @@ MySQL, no intermediate files), extracting one archive at a time so the whole sto
 79 GB free. Sniffs already loaded are skipped by content hash, so it is safe to stop and restart.
 
 `-MaxContentExpansion` filters by content rather than build number, because Burning Crusade
-Classic carries a very high build.
+Classic carries a very high build. It drops whole sniffs, so prefer `-MapPolicy` for a
+WotLK-and-below corpus: that keeps the parts of a Cataclysm or Shadowlands capture standing on
+ground a 3.3.5 server still has, and throws away only the rest.
+
+#### The map gate is what makes Cataclysm and later affordable
+
+`-MapPolicy wotlk` keeps only maps present in 3.3.5a `Map.dbc`, read out of a client install
+because AzerothCore ships `map_dbc` empty. Everything else never reaches a handler.
+
+The numbers that forced it, measured on the 3,101 sniff corpus:
+
+| | sniffs | packets |
+|---|---:|---:|
+| touch only instance maps | 19 | 350,939 |
+| mix world and instance | 667 | 553,722,129 |
+
+Only 19 sniffs are pure instance content, so **excluding by file name is worth nothing** - but
+the mixed ones hold **71.7% of the whole corpus by packet count**. The saving has to come from
+inside the file or not at all. Measured per sniff afterwards:
+
+| capture | dropped | maps |
+|---|---:|---|
+| 4.4.1 Cata Classic | 93.2% (2,648,418 of 2,842,330) | Firelands (720) |
+| 9.0.2 Castle Nathria | 100.0% (720,704 of 720,807) | 2296, 2222 |
+| 3.4.3 WotLK Classic | 0% | every map it visited exists in 3.3.5 |
+
+That last row is the point: the gate is a no-op on the branches already being ingested, so it
+cannot disturb them.
+
+**How it works.** A capture is a linked list, not an array - records are variable length, so
+there is no seeking to packet N. But the map changes only a couple of dozen times in a
+multi-hour capture (38 map-defining packets in 2.8M), so those three opcodes are parsed in file
+order on the reader thread and every other packet is stamped with the map in force when it
+arrived. `Settings.MapFilters` is a different thing entirely: it drops rows on the way out of
+the SQL builders, after everything has already been parsed, and saves no time.
+
+**What is never gated.** Opcodes whose handler advances the per-connection zlib stream, because
+skipping one desynchronises it and would quietly corrupt every compressed packet after it -
+including the ones on the maps being kept. They cost nothing: a 2.8M packet 4.4.1 capture holds
+none of them at all.
+
+**Where it does not fire.** Classic Era 1.15.x resolves no map, so nothing is gated on those
+sniffs. That is the safe failure - it parses everything rather than dropping the wrong thing -
+and it costs nothing here, because every Classic Era map exists in 3.3.5 anyway. `sniff_map`
+records the packet census per map, so a build where the gate silently stops working shows up as
+a sniff with no attributed packets.
+
+**Gating is not the same as validity.** The gate is about cost; `map_validity` is about whether
+the data can be used. It now covers all 135 maps: a map is usable from the branch of the
+expansion that introduced it onward, until something rebuilt its terrain. Cataclysm reshaped the
+old world plus Deadmines, Shadowfang Keep, Zul'Gurub and Zul'Aman; Mists rebuilt Scarlet
+Monastery and Scholomance. Everything else took minor adjustments at most - which is why a
+Cataclysm capture of UBRS or Zul'Farrak, or a Shadowlands one of Outland, is good evidence for
+3.3.5, and a Cataclysm capture of Deadmines is not.
+
+#### What one sniff now yields
+
+Beyond spawns, waypoints and loot: `creature_spell_cast` (every SMSG_SPELL_START by a creature,
+raw), `spell_target`, `spell_destination`, `creature_equip`, `creature_aura`, `gossip_menu`,
+`gossip_menu_option`, `npc_text` and `areatrigger_teleport`. `scripts/TABLES.md` says what each
+one holds and which of the old database's 53 tables are worth keeping.
+
+Loot refuses to run on Mists and later: area looting lets one response cover several corpses, so
+the collector's one-loot-per-owner model does not hold and it would record confident nonsense.
+The `sniff_coverage` row says so rather than leaving a silent zero. Cataclysm loot parses fine -
+verified on 4.4.1, which reports `empty` rather than `unsupported`.
 
 ### 2. Mine the routes
 
@@ -237,6 +302,17 @@ file from `DROP TABLE IF EXISTS dg_route_pt;` to the end, drop the `ALTER TABLE 
 COLUMN` line (those columns already exist), keep the session settings from the top, and run
 that: 93 seconds against four hours. Everything before phase 4c depends only on `creature_spawn`,
 `creature_movement` and `creature_waypoint`.
+
+### 3b. Derive the spell timers
+
+```
+mysql -u root -p wpp_ingest2 < spell-timers.sql
+```
+
+Turns raw `creature_spell_cast` rows into `st_timer`, one min/max pair per creature entry and
+spell. AzerothCore models a spell as a min and a max timer while retail uses a fixed cooldown
+plus a per-update chance, so the pair is an approximation - the script's header says which
+quantiles it picks and why the raw extremes are not the ones to publish.
 
 ### 4. Publish the loot and gameobjects
 
