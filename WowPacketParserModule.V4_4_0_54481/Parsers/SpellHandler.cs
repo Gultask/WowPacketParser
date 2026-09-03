@@ -65,17 +65,25 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
             Vector3? dstLocation = null;
             if (hasDstLoc)
             {
-                ReadLocation(packet, idx, "DstLocation");
+                dstLocation = ReadLocation(packet, idx, "DstLocation");
                 if (packetSpellData != null)
                     packetSpellData.DstLocation = dstLocation;
             }
 
             if (hasOrient)
-                packet.ReadSingle("Orientation", idx);
+            {
+                var orientation = packet.ReadSingle("Orientation", idx);
+                if (packetSpellData != null)
+                    packetSpellData.DstOrientation = orientation;
+            }
 
             int mapID = -1;
             if (hasMapID)
+            {
                 mapID = (ushort)packet.ReadInt32("MapID", idx);
+                if (packetSpellData != null)
+                    packetSpellData.DstMapId = (uint)mapID;
+            }
 
             if (Settings.UseDBC && dstLocation != null && mapID != -1)
             {

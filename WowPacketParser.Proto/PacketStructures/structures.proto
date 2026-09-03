@@ -267,6 +267,7 @@ message PacketSpellData {
   optional uint32 ammoInventoryType = 14;
   optional uint32 castCount = 15;
   optional float dstOrientation = 16;
+  optional uint32 dstMapId = 17;
 }
 
 message PacketSpellStart {

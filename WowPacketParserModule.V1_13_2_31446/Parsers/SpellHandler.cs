@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using WowPacketParser.DBC;
 using WowPacketParser.Enums;
@@ -55,7 +55,11 @@ namespace WowPacketParserModule.V1_13_2_31446.Parsers
 
             int mapID = -1;
             if (hasMapID)
+            {
                 mapID = (ushort)packet.ReadInt32("MapID", idx);
+                if (packetSpellData != null)
+                    packetSpellData.DstMapId = (uint)mapID;
+            }
 
             if (Settings.UseDBC && dstLocation != null && mapID != -1)
             {

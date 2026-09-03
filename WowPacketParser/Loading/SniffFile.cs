@@ -1038,7 +1038,9 @@ namespace WowPacketParser.Loading
         /// and since those timers have no upper bound, deciding here which quantile stands in
         /// for a maximum would be deciding it before anyone has looked at the data.
         ///
-        /// Players are excluded. So are pets, which on this high guid are usually a player's.
+        /// Players are excluded from the casts. So are pets, which on this high guid are usually
+        /// a player's. Destinations are not filtered that way: a spell with a DB position target
+        /// is normally a portal or a teleport, which is exactly a thing players cast.
         /// </summary>
         private List<CreatureSpellCastRecord> CollectCreatureSpellCasts(ulong sniffId, Packets packets,
                                                                         out List<SpellTargetRecord> targets,
@@ -1068,6 +1070,28 @@ namespace WowPacketParser.Loading
 
             var targetHits = new Dictionary<(uint Spell, uint Caster, uint Target), SpellTargetRecord>();
             var dests = new Dictionary<(uint Spell, uint Caster, float X, float Y, float Z), SpellDestinationRecord>();
+
+            // Where the client was standing, in order. A ground-targeted spell is usually cast
+            // by a player - portals, teleports, summons are the whole point of the target type -
+            // and a player is not in Storage.Objects as a Unit, so without this the row that
+            // spell_target_position most wants is the one that gets dropped.
+            var ports = MovementHandler.WorldPorts.OrderBy(w => w.Time).ToList();
+
+            uint? MapAt(DateTime? when)
+            {
+                if (when == null || ports.Count == 0)
+                    return null;
+
+                uint? map = null;
+                foreach (var port in ports)
+                {
+                    if (port.Time > when.Value)
+                        break;
+                    map = port.Map;
+                }
+
+                return map;
+            }
 
             // A start and the go that completes it share a cast id, and one cast can be
             // reported more than once when it hits several targets. Both are resolved by id:
@@ -1149,15 +1173,19 @@ namespace WowPacketParser.Loading
                 var dst = data.DstLocation;
                 if (dst != null && !(dst.X == 0 && dst.Y == 0 && dst.Z == 0))
                 {
-                    uint? map = null;
-                    if (casterKey != null && units.TryGetValue(casterKey, out var casterUnit))
+                    // The packet's own map first: a teleport lands somewhere other than where
+                    // it was cast, so the caster's map is the one map it is guaranteed not to be.
+                    uint? map = data.HasDstMapId ? data.DstMapId : null;
+                    if (map == null && casterKey != null && units.TryGetValue(casterKey, out var casterUnit))
                         map = casterUnit.Map;
-                    else if (data.TargetUnit != null)
+                    else if (map == null && data.TargetUnit != null)
                     {
                         var targetKey = GuidKey(data.TargetUnit);
                         if (targetKey != null && units.TryGetValue(targetKey, out var targetUnit))
                             map = targetUnit.Map;
                     }
+
+                    map ??= MapAt(seen);
 
                     // Without a map the coordinates cannot be placed, and a guess would be worse
                     // than the missing row.
