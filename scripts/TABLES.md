@@ -1,0 +1,85 @@
+# What is in the ingest database
+
+Written 2026-09-03, when `wpp_ingest` had grown to 53 tables and nobody could say what half of
+them were for any more. Every table below was attributed by looking for the statement that
+creates it; anything with no such statement is named as an orphan rather than guessed at.
+
+Three kinds of table live here, and only the first is precious.
+
+## 1. Parser-written — the ingest itself
+
+Created by `WowPacketParser/SQL/IngestDatabase.cs` and filled by `--DumpFormat 17`. These are
+the only tables that cannot be rebuilt without re-reading the sniffs, which takes about a day.
+
+| table | one row per | notes |
+|---|---|---|
+| `sniff` | file | build, branch, packet counts, clock. Everything else hangs off `sniff_id`. |
+| `sniff_map` | sniff × map | yield per map, plus the packet census and how many were gated |
+| `sniff_coverage` | sniff × capability | what this sniff *could* give up; see below |
+| `map_validity` | target × map | which branches' terrain matches 3.3.5, and what rebuilt the rest |
+| `creature_spawn` | sniff × creature | position, level, faction, flags. Dead creatures excluded. |
+| `gameobject_spawn` | sniff × gameobject | position and rotation quaternion |
+| `creature_waypoint` | move order point | the big one — destinations, not pathfinding filler |
+| `creature_movement` | sniff × creature | movement reduced to a centre and a radius |
+| `loot_instance` / `loot_instance_item` | loot opened | empty loots kept on purpose: they are the denominator |
+| `creature_spell_cast` | SMSG_SPELL_START | raw; the gap between two is the cooldown observation |
+| `spell_target` | sniff × spell × target entry | what an entry-targeted spell actually hit |
+| `spell_destination` | sniff × spell × point | where a ground-targeted spell was aimed |
+| `creature_equip` | sniff × creature | the three virtual item slots |
+| `creature_aura` | sniff × creature × spell | with a flag for auras present at creation |
+| `gossip_menu` / `gossip_menu_option` / `npc_text` | menu, option, text | as the server sent them |
+| `areatrigger_teleport` | trigger paired to a world change | `delay_ms` says how much to trust the pairing |
+
+`sniff_coverage` is the one that is easy to underrate. A sniff that produced no loot because its
+build has no `SMSG_LOOT_RESPONSE` and a sniff that produced no loot because the player looted
+nothing both look like zero rows afterwards. The difference is only knowable at parse time, so
+it is recorded then: `status` is `ok`, `empty` or `unsupported`, and `collector_version` makes
+the sniffs that predate a collector improvement selectable as a re-parse work list.
+
+## 2. Script-derived — rebuildable, and dropped by their own script
+
+Re-running the script drops and recreates these, so losing them costs only time.
+
+| tables | built by | cost |
+|---|---|---|
+| `wp_point`, `wp_node`, `wp_edge`, `wp_edge_raw`, `wp_level`, `wp_stack`, `wp_zobs` | `mine-paths.sql` | ~1 h 35 m |
+| `path_summary`, `path_point` | `mine-paths.sh` (via `chain-paths.py`) | 11 s once the graph exists |
+| `dg_spawn`, `dg_est`, `dg_approx`, `dg_fixed`, `dg_inst_rad`, `dg_rad_key`, `dg_route_pt` | `build-digest.sql` | ~4 h |
+| `st_gap`, `st_timer` | `spell-timers.sql` | minutes |
+
+## 3. Orphans — no script creates them
+
+Twenty-seven tables, and this is the part of the question that was worth asking. None of them
+has a statement anywhere in the repository that would recreate it, which means each was typed at
+a prompt during one investigation and then left behind. `PIPELINE.md` already warns about
+exactly this; these are the debt it was warning about.
+
+| tables | what they were |
+|---|---|
+| `pub_loot_set`, `pub_loot`, `pub_loot_item`, `pub_names`, `pub_go_spawn`, `pub_go_point`, `pub_reject` | the first loot release layout. **Superseded**: `publish-loot.sql` now writes `acore_world.sniff_*` directly, and nothing in the repository reads a `pub_` table any more. |
+| `qgo`, `qgo_ac`, `qgo_match`, `qgo_obs`, `qgo_persniff`, `qgo_quest`, `qgo_report`, `qgo_sn`, `qgo_win` | a quest-gameobject investigation |
+| `acwp`, `acgo` | AzerothCore's own waypoints and gameobjects, imported to compare against |
+| `go_point`, `go_diff` | gameobject point comparison, an ancestor of `pub_go_point` |
+| `zone_cov`, `zone_target` | coverage per zone, for deciding where to sniff next |
+| `multispawn_evidence`, `rt_end`, `ta`, `wp_deg`, `loot_readable` | scratch from the spawn and route work |
+
+**Recommendation: let all twenty-seven go.** They are 205 MB and no live path reads any of them.
+The rebuild happening now writes into a new database and simply does not carry them across, so
+nothing has to be deleted — the old `wpp_ingest` stays where it is until it is not wanted.
+
+The rule that stops this recurring is already in `PIPELINE.md`: anything typed at a prompt
+belongs in a script before the session ends. `spell-timers.sql` exists because of that rule.
+
+## Rebuilding
+
+The current run writes to **`wpp_ingest2`**, not `wpp_ingest`. That is deliberate:
+
+- `sniff_map` gained columns (`packets`, `gated_packets`, `creature_spells`) and the DDL is
+  `CREATE TABLE IF NOT EXISTS`, so an existing table would silently keep the old shape.
+- The old database stays queryable, and the published digest keeps working, while the new one
+  is checked.
+
+One thing the rebuild gets back for free: `distill-waypoints.sql` permanently deleted 12.8M
+waypoints belonging to 106,437 creatures, and `build-digest.sql` measures its spawn radius from
+waypoints where it has them. Those come back in `wpp_ingest2`. Per `PIPELINE.md`, run
+`build-digest.sql` **before** any re-distillation this time, and keep its radius output.

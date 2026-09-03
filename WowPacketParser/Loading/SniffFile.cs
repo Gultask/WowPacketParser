@@ -13,6 +13,7 @@ using WowPacketParser.Hotfix;
 using WowPacketParser.Misc;
 using WowPacketParser.PacketStructures;
 using WowPacketParser.Parsing;
+using WowPacketParser.Parsing.Parsers;
 using WowPacketParser.Proto;
 using WowPacketParser.Saving;
 using WowPacketParser.SQL;
@@ -226,16 +227,35 @@ namespace WowPacketParser.Loading
                                 _firstPacketTimeUtc ??= packet.Time;
                                 _lastPacketTimeUtc = packet.Time;
                                 ++_packetsRead;
+
+                                // In file order, on this thread: the gate's answer depends on
+                                // map changes it has to have already seen, which the parallel
+                                // stage below cannot promise.
+                                if (packet.Direction != Direction.BNClientToServer &&
+                                    packet.Direction != Direction.BNServerToClient)
+                                {
+                                    if (!IngestMapGate.Admit(packet, out var parsedHere))
+                                        packet.Gated = true;
+                                    else if (parsedHere)
+                                        packet.ParsedInReader = true;
+                                }
                             }
 
                             return Tuple.Create(packet, b);
                         }, packet => // parse
                         {
+                            if (packet.Gated)
+                            {
+                                packet.Status = ParsedStatus.NotParsed;
+                                _stats.AddByStatus(packet.Status);
+                                return packet;
+                            }
+
                             // Parse the packet, adding text to Writer and stuff to the stores
                             if (packet.Direction == Direction.BNClientToServer ||
                                 packet.Direction == Direction.BNServerToClient)
                                 BattlenetHandler.ParseBattlenet(packet);
-                            else
+                            else if (!packet.ParsedInReader)
                                 Handler.Parse(packet);
 
                             // Update statistics
@@ -309,8 +329,7 @@ namespace WowPacketParser.Loading
                             {
                                 if (_dumpFormat.IsUniversalProtobufType() || HotfixSettings.Instance.ShouldLog())
                                     packets.Packets_.Add(packet.Holder);
-                                else if (movementEnabled &&
-                                         (packet.Holder.MonsterMove != null || packet.Holder.AiReaction != null))
+                                else if (movementEnabled && WantedByIngest(packet.Holder))
                                     packets.Packets_.Add(packet.Holder);
                             }
                         }, threadCount);
@@ -340,6 +359,18 @@ namespace WowPacketParser.Loading
                     }
 
                     Trace.WriteLine($"{_logPrefix}: {_stats}");
+
+                    if (IngestMapGate.Enabled && IngestMapGate.GatedCount > 0)
+                    {
+                        var dropped = IngestMapGate.Census
+                            .Where(c => c.Key != uint.MaxValue && !IngestMapGate.IsMapWanted(c.Key))
+                            .OrderByDescending(c => c.Value)
+                            .Select(c => $"{c.Key} ({c.Value})");
+
+                        Trace.WriteLine($"{_logPrefix}: map gate dropped {IngestMapGate.GatedCount} of " +
+                                        $"{_packetsRead} packets ({IngestMapGate.GatedCount * 100.0 / _packetsRead:F1}%) " +
+                                        $"on maps {string.Join(", ", dropped)}");
+                    }
 
                     if (_dumpFormat == DumpFormatType.Database)
                         SaveToIngestDatabase(packets);
@@ -669,8 +700,14 @@ namespace WowPacketParser.Loading
                 coverage.Add(Coverage(CollectorVersion.CreatureMovement, CollectorVersion.CreatureMovementVersion,
                                       moveWritten, Opcode.SMSG_ON_MONSTER_MOVE));
 
-                var loots = CollectLootInstances(sniffId);
-                var lootWritten = IngestDatabase.SaveLootInstances(sniffId, loots);
+                // Mists introduced area looting, which changed what a loot response means: one
+                // response can cover several corpses at once. The collector's whole model is one
+                // loot per owner, so on those builds it would record confident nonsense rather
+                // than nothing. Refusing is the honest outcome, and the coverage row says why
+                // instead of leaving a silent zero that looks like a player who never looted.
+                var lootSupported = ClientVersion.ContentExpansion < ClientType.MistsOfPandaria;
+                var loots = lootSupported ? CollectLootInstances(sniffId) : new List<LootInstanceRecord>();
+                var lootWritten = lootSupported ? IngestDatabase.SaveLootInstances(sniffId, loots) : 0;
                 if (loots.Count > 0)
                     Trace.WriteLine($"{_logPrefix}: {lootWritten} loot instances recorded");
                 foreach (var l in loots)
@@ -678,8 +715,82 @@ namespace WowPacketParser.Loading
                     if (l.Map != null)
                         MapRow(l.Map.Value).LootInstances++;
                 }
-                coverage.Add(Coverage(CollectorVersion.Loot, CollectorVersion.LootVersion,
-                                      lootWritten, Opcode.SMSG_LOOT_RESPONSE));
+
+                coverage.Add(lootSupported
+                    ? Coverage(CollectorVersion.Loot, CollectorVersion.LootVersion,
+                               lootWritten, Opcode.SMSG_LOOT_RESPONSE)
+                    : new SniffCoverageRecord
+                    {
+                        Capability = CollectorVersion.Loot,
+                        Status = CollectorVersion.StatusUnsupported,
+                        CollectorVersion = CollectorVersion.LootVersion,
+                        RowsWritten = 0,
+                        Reason = $"{ClientVersion.ContentExpansion} has area looting; one response " +
+                                 "can cover several corpses and the one-loot-per-owner model does not hold"
+                    });
+
+
+                var spellCasts = CollectCreatureSpellCasts(sniffId, packets, out var spellTargets, out var spellDests);
+                var spellWritten = IngestDatabase.SaveCreatureSpellCasts(sniffId, spellCasts);
+                if (spellCasts.Count > 0)
+                    Trace.WriteLine($"{_logPrefix}: {spellWritten} creature spell casts recorded");
+                foreach (var cast in spellCasts)
+                    MapRow(cast.Map).CreatureSpells++;
+                coverage.Add(Coverage(CollectorVersion.CreatureSpell, CollectorVersion.CreatureSpellVersion,
+                                      spellWritten, Opcode.SMSG_SPELL_START));
+
+                var targetWritten = IngestDatabase.SaveSpellTargets(sniffId, spellTargets);
+                coverage.Add(Coverage(CollectorVersion.SpellTarget, CollectorVersion.SpellTargetVersion,
+                                      targetWritten, Opcode.SMSG_SPELL_GO));
+
+                var destWritten = IngestDatabase.SaveSpellDestinations(sniffId, spellDests);
+                coverage.Add(Coverage(CollectorVersion.SpellDestination, CollectorVersion.SpellDestinationVersion,
+                                      destWritten, Opcode.SMSG_SPELL_GO));
+
+                var equipment = CollectCreatureEquipment(sniffId);
+                var equipWritten = IngestDatabase.SaveCreatureEquipment(sniffId, equipment);
+                if (equipment.Count > 0)
+                    Trace.WriteLine($"{_logPrefix}: {equipWritten} creature equipment sets recorded");
+                coverage.Add(Coverage(CollectorVersion.CreatureEquip, CollectorVersion.CreatureEquipVersion,
+                                      equipWritten, Opcode.SMSG_UPDATE_OBJECT));
+
+                var creatureAuras = CollectCreatureAuras(sniffId);
+                var auraWritten = IngestDatabase.SaveCreatureAuras(sniffId, creatureAuras);
+                if (creatureAuras.Count > 0)
+                    Trace.WriteLine($"{_logPrefix}: {auraWritten} creature auras recorded");
+                coverage.Add(Coverage(CollectorVersion.CreatureAura, CollectorVersion.CreatureAuraVersion,
+                                      auraWritten, Opcode.SMSG_AURA_UPDATE));
+
+                var gossipMenus = CollectGossip(sniffId, packets, out var gossipOptions, out var npcTexts);
+                var gossipWritten = IngestDatabase.SaveGossipMenus(sniffId, gossipMenus);
+                IngestDatabase.SaveGossipMenuOptions(sniffId, gossipOptions);
+                IngestDatabase.SaveNpcTexts(sniffId, npcTexts);
+                if (gossipMenus.Count > 0)
+                    Trace.WriteLine($"{_logPrefix}: {gossipWritten} gossip menus, {gossipOptions.Count} options, " +
+                                    $"{npcTexts.Count} texts recorded");
+                coverage.Add(Coverage(CollectorVersion.Gossip, CollectorVersion.GossipVersion,
+                                      gossipWritten, Opcode.SMSG_GOSSIP_MESSAGE));
+
+                var teleports = CollectAreaTriggerTeleports(sniffId, packets);
+                var teleWritten = IngestDatabase.SaveAreaTriggerTeleports(sniffId, teleports);
+                if (teleports.Count > 0)
+                    Trace.WriteLine($"{_logPrefix}: {teleWritten} areatrigger teleports recorded");
+                coverage.Add(Coverage(CollectorVersion.AreaTriggerTeleport, CollectorVersion.AreaTriggerTeleportVersion,
+                                      teleWritten, Opcode.CMSG_AREA_TRIGGER));
+
+                // The census counts every packet, including maps that yielded nothing and maps
+                // that were gated away entirely - which is the only record that they were ever
+                // in the file, since nothing else survives the gate.
+                foreach (var seen in IngestMapGate.Census)
+                {
+                    if (seen.Key == uint.MaxValue)
+                        continue;
+
+                    var row = MapRow(seen.Key);
+                    row.Packets = seen.Value;
+                    if (!IngestMapGate.IsMapWanted(seen.Key))
+                        row.GatedPackets = seen.Value;
+                }
 
                 IngestDatabase.SaveSniffMaps(sniffId, maps.Values.ToList());
                 IngestDatabase.SaveCoverage(sniffId, coverage);
@@ -823,7 +934,12 @@ namespace WowPacketParser.Loading
         /// </summary>
         private static SniffCoverageRecord Coverage(string capability, int version, int written, Opcode needs)
         {
-            if (Opcodes.GetOpcode(needs, Direction.ServerToClient) == 0)
+            // Rows are proof the opcode was there, whatever the table says. Without this a
+            // client-to-server opcode reads as unsupported on every build, because the lookup
+            // below only ever asks the server-to-client table.
+            if (written == 0 &&
+                Opcodes.GetOpcode(needs, Direction.ServerToClient) == 0 &&
+                Opcodes.GetOpcode(needs, Direction.ClientToServer) == 0)
             {
                 return new SniffCoverageRecord
                 {
@@ -913,6 +1029,475 @@ namespace WowPacketParser.Loading
         /// by IsTemporarySpawn. Corpses are dropped outright rather than flagged: a dead
         /// creature's position is where it died, which says nothing about where it spawns.
         /// </summary>
+
+        /// <summary>
+        /// Every spell a creature began casting, plus what its completed casts hit and where
+        /// they were aimed.
+        ///
+        /// Starts are kept as raw rows: the gap between two of them is the timer observation,
+        /// and since those timers have no upper bound, deciding here which quantile stands in
+        /// for a maximum would be deciding it before anyone has looked at the data.
+        ///
+        /// Players are excluded. So are pets, which on this high guid are usually a player's.
+        /// </summary>
+        private List<CreatureSpellCastRecord> CollectCreatureSpellCasts(ulong sniffId, Packets packets,
+                                                                        out List<SpellTargetRecord> targets,
+                                                                        out List<SpellDestinationRecord> destinations)
+        {
+            var casts = new List<CreatureSpellCastRecord>();
+            targets = new List<SpellTargetRecord>();
+            destinations = new List<SpellDestinationRecord>();
+
+            if (packets == null)
+                return casts;
+
+            // Spell packets carry no map, so take it from the object that cast.
+            var units = new Dictionary<string, (uint Entry, uint Map)>();
+            foreach (var pair in Storage.Objects)
+            {
+                var obj = pair.Value.Item1;
+                if (obj.Type != ObjectType.Unit)
+                    continue;
+
+                var unitEntry = obj.ObjectData?.EntryID;
+                if (unitEntry == null || unitEntry == 0)
+                    continue;
+
+                units[GuidKey(pair.Key)] = ((uint)unitEntry, obj.Map);
+            }
+
+            var targetHits = new Dictionary<(uint Spell, uint Caster, uint Target), SpellTargetRecord>();
+            var dests = new Dictionary<(uint Spell, uint Caster, float X, float Y, float Z), SpellDestinationRecord>();
+
+            // A start and the go that completes it share a cast id, and one cast can be
+            // reported more than once when it hits several targets. Both are resolved by id:
+            // the first start of an id becomes the row, and any go with that id marks it done.
+            var startByCast = new Dictionary<string, CreatureSpellCastRecord>();
+            var seenStarts = new HashSet<string>();
+
+            foreach (var holder in packets.Packets_)
+            {
+                var go = holder.SpellGo?.Data;
+                var start = holder.SpellStart?.Data;
+                var data = go ?? start;
+                if (data?.Caster == null || data.Spell == 0)
+                    continue;
+
+                var casterKey = GuidKey(data.Caster);
+                var casterIsCreature = data.Caster.Type == UniversalHighGuid.Creature ||
+                                       data.Caster.Type == UniversalHighGuid.Vehicle;
+                var seen = holder.BaseData?.Time?.ToDateTime();
+                var castId = data.CastGuid != null ? GuidKey(data.CastGuid) : null;
+                if (castId == null && data.CastId != 0)
+                    castId = $"{casterKey}:{data.Spell}:{data.CastId}";
+
+                if (casterIsCreature && casterKey != null && units.TryGetValue(casterKey, out var caster))
+                {
+                    if (start != null && (castId == null || seenStarts.Add(castId)))
+                    {
+                        var row = new CreatureSpellCastRecord
+                        {
+                            SniffId = sniffId,
+                            Guid = casterKey,
+                            Entry = caster.Entry,
+                            Map = caster.Map,
+                            SpellId = data.Spell,
+                            StartedUtc = seen
+                        };
+
+                        casts.Add(row);
+                        if (castId != null)
+                            startByCast[castId] = row;
+                    }
+                    else if (go != null && castId != null && startByCast.TryGetValue(castId, out var started))
+                    {
+                        started.Completed = true;
+                    }
+                }
+
+                // Targets come off a completed cast only: an interrupted start never landed on
+                // anything, and its target list is what the caster meant rather than what it hit.
+                if (go != null)
+                {
+                    foreach (var hit in go.HitTargets)
+                    {
+                        if (hit == null || hit.Entry == 0)
+                            continue;
+                        if (hit.Type != UniversalHighGuid.Creature && hit.Type != UniversalHighGuid.Vehicle &&
+                            hit.Type != UniversalHighGuid.GameObject)
+                            continue;
+
+                        var casterEntry = data.Caster.Entry;
+                        var tkey = (data.Spell, casterEntry, hit.Entry);
+                        if (!targetHits.TryGetValue(tkey, out var row))
+                        {
+                            targetHits[tkey] = row = new SpellTargetRecord
+                            {
+                                SniffId = sniffId,
+                                SpellId = data.Spell,
+                                CasterEntry = casterEntry,
+                                CasterType = data.Caster.Type.ToString(),
+                                TargetEntry = hit.Entry,
+                                TargetType = hit.Type.ToString()
+                            };
+                        }
+
+                        row.Hits++;
+                    }
+                }
+
+                var dst = data.DstLocation;
+                if (dst != null && !(dst.X == 0 && dst.Y == 0 && dst.Z == 0))
+                {
+                    uint? map = null;
+                    if (casterKey != null && units.TryGetValue(casterKey, out var casterUnit))
+                        map = casterUnit.Map;
+                    else if (data.TargetUnit != null)
+                    {
+                        var targetKey = GuidKey(data.TargetUnit);
+                        if (targetKey != null && units.TryGetValue(targetKey, out var targetUnit))
+                            map = targetUnit.Map;
+                    }
+
+                    // Without a map the coordinates cannot be placed, and a guess would be worse
+                    // than the missing row.
+                    if (map.HasValue)
+                    {
+                        var dkey = (data.Spell, data.Caster.Entry, dst.X, dst.Y, dst.Z);
+                        if (!dests.TryGetValue(dkey, out var row))
+                        {
+                            dests[dkey] = row = new SpellDestinationRecord
+                            {
+                                SniffId = sniffId,
+                                SpellId = data.Spell,
+                                CasterEntry = data.Caster.Entry,
+                                Map = map.Value,
+                                PositionX = dst.X,
+                                PositionY = dst.Y,
+                                PositionZ = dst.Z,
+                                Orientation = data.HasDstOrientation ? data.DstOrientation : null
+                            };
+                        }
+
+                        row.Casts++;
+                    }
+                }
+            }
+
+            targets.AddRange(targetHits.Values);
+            destinations.AddRange(dests.Values);
+            return casts;
+        }
+
+        /// <summary>
+        /// Which parsed packets are worth keeping in memory when the destination is the ingest
+        /// database rather than a proto file.
+        ///
+        /// Everything else is dropped the moment it is parsed: a long capture holds millions of
+        /// packets and keeping every holder costs gigabytes for data no collector reads. Adding
+        /// a collector that reads a new packet kind means adding that kind here, and the symptom
+        /// of forgetting is a collector that silently returns nothing.
+        /// </summary>
+        private static bool WantedByIngest(PacketHolder holder)
+        {
+            return holder.MonsterMove != null ||
+                   holder.AiReaction != null ||
+                   holder.SpellGo != null ||
+                   holder.SpellStart != null ||
+                   holder.GossipMessage != null ||
+                   holder.NpcText != null ||
+                   holder.NpcTextOld != null ||
+                   holder.ClientAreaTrigger != null;
+        }
+
+        /// <summary>What each creature was drawn holding.</summary>
+        private List<CreatureEquipRecord> CollectCreatureEquipment(ulong sniffId)
+        {
+            var equipment = new List<CreatureEquipRecord>();
+
+            foreach (var pair in Storage.Objects)
+            {
+                var obj = pair.Value.Item1;
+                if (obj.Type != ObjectType.Unit || obj is not Unit unit || unit.UnitData == null)
+                    continue;
+
+                var entry = obj.ObjectData?.EntryID;
+                if (entry == null || entry == 0)
+                    continue;
+
+                CreatureEquipment gear;
+                try
+                {
+                    gear = unit.GetEquipment();
+                }
+                catch (Exception)
+                {
+                    // VirtualItems is not present on every build; a creature without it simply
+                    // has no equipment to report.
+                    continue;
+                }
+
+                if (gear == null)
+                    continue;
+
+                equipment.Add(new CreatureEquipRecord
+                {
+                    SniffId = sniffId,
+                    Guid = GuidKey(pair.Key),
+                    Entry = (uint)entry,
+                    Map = obj.Map,
+                    ItemId1 = gear.ItemID1 ?? 0,
+                    ItemId2 = gear.ItemID2 ?? 0,
+                    ItemId3 = gear.ItemID3 ?? 0
+                });
+            }
+
+            return equipment;
+        }
+
+        /// <summary>
+        /// Auras seen on creatures. Auras present in the block that created the creature are
+        /// flagged, because those are the ones a spawn is meant to start with - anything added
+        /// later may be a player acting on it.
+        /// </summary>
+        private List<CreatureAuraRecord> CollectCreatureAuras(ulong sniffId)
+        {
+            var auras = new List<CreatureAuraRecord>();
+
+            foreach (var pair in Storage.Objects)
+            {
+                var obj = pair.Value.Item1;
+                if (obj.Type != ObjectType.Unit || obj is not Unit unit)
+                    continue;
+
+                var entry = obj.ObjectData?.EntryID;
+                if (entry == null || entry == 0)
+                    continue;
+
+                var guid = GuidKey(pair.Key);
+                var bySpell = new Dictionary<uint, CreatureAuraRecord>();
+
+                void Record(Aura aura, bool onCreate)
+                {
+                    if (aura == null || aura.SpellId == 0)
+                        return;
+
+                    if (!bySpell.TryGetValue(aura.SpellId, out var row))
+                    {
+                        bySpell[aura.SpellId] = row = new CreatureAuraRecord
+                        {
+                            SniffId = sniffId,
+                            Guid = guid,
+                            Entry = (uint)entry,
+                            Map = obj.Map,
+                            SpellId = aura.SpellId,
+                            SelfCast = aura.CasterGuid == null || aura.CasterGuid.IsEmpty() ||
+                                       aura.CasterGuid == pair.Key
+                        };
+                    }
+
+                    row.Observations++;
+                    if (onCreate)
+                        row.OnCreate = true;
+                    if (aura.MaxDuration != 0 && (row.MaxDurationMs == null || aura.MaxDuration > row.MaxDurationMs))
+                        row.MaxDurationMs = aura.MaxDuration;
+                }
+
+                if (unit.Auras != null)
+                {
+                    foreach (var aura in unit.Auras)
+                        Record(aura, true);
+                }
+
+                if (unit.AddedAuras != null)
+                {
+                    foreach (var list in unit.AddedAuras)
+                    {
+                        if (list == null)
+                            continue;
+                        foreach (var aura in list)
+                            Record(aura, false);
+                    }
+                }
+
+                auras.AddRange(bySpell.Values);
+            }
+
+            return auras;
+        }
+
+        /// <summary>Gossip menus, their options and the texts they point at.</summary>
+        private List<GossipMenuRecord> CollectGossip(ulong sniffId, Packets packets,
+                                                     out List<GossipMenuOptionRecord> options,
+                                                     out List<NpcTextRecord> texts)
+        {
+            var menus = new List<GossipMenuRecord>();
+            options = new List<GossipMenuOptionRecord>();
+            texts = new List<NpcTextRecord>();
+
+            if (packets == null)
+                return menus;
+
+            var seenMenus = new Dictionary<(uint Menu, uint Text, uint Entry), GossipMenuRecord>();
+            var seenOptions = new HashSet<(uint Menu, uint Index)>();
+            var seenTexts = new HashSet<(uint Text, int Slot)>();
+
+            foreach (var holder in packets.Packets_)
+            {
+                var gossip = holder.GossipMessage;
+                if (gossip != null)
+                {
+                    var entry = gossip.GossipSource?.Entry ?? 0;
+                    var key = (gossip.MenuId, gossip.TextId, entry);
+                    if (!seenMenus.TryGetValue(key, out var menu))
+                    {
+                        seenMenus[key] = menu = new GossipMenuRecord
+                        {
+                            SniffId = sniffId,
+                            MenuId = gossip.MenuId,
+                            TextId = gossip.TextId,
+                            CreatureEntry = entry
+                        };
+                        menus.Add(menu);
+                    }
+
+                    menu.Observations++;
+
+                    foreach (var option in gossip.Options)
+                    {
+                        if (!seenOptions.Add((gossip.MenuId, option.OptionIndex)))
+                            continue;
+
+                        options.Add(new GossipMenuOptionRecord
+                        {
+                            SniffId = sniffId,
+                            MenuId = gossip.MenuId,
+                            OptionIndex = option.OptionIndex,
+                            OptionIcon = option.OptionNpc,
+                            OptionText = option.Text,
+                            BoxMoney = option.BoxCost,
+                            BoxCoded = option.BoxCoded,
+                            BoxText = option.BoxText
+                        });
+                    }
+                }
+
+                var old = holder.NpcTextOld;
+                if (old != null)
+                {
+                    for (var i = 0; i < old.Texts.Count; i++)
+                    {
+                        if (!seenTexts.Add((old.Entry, i)))
+                            continue;
+
+                        var t = old.Texts[i];
+                        texts.Add(new NpcTextRecord
+                        {
+                            SniffId = sniffId,
+                            TextId = old.Entry,
+                            Slot = i,
+                            Probability = t.Probability,
+                            Text0 = t.Text0,
+                            Text1 = t.Text1,
+                            Language = (uint)t.Language,
+                            BroadcastTextId = 0
+                        });
+                    }
+                }
+
+                var modern = holder.NpcText;
+                if (modern != null)
+                {
+                    for (var i = 0; i < modern.Texts.Count; i++)
+                    {
+                        if (!seenTexts.Add((modern.Entry, i)))
+                            continue;
+
+                        var t = modern.Texts[i];
+                        texts.Add(new NpcTextRecord
+                        {
+                            SniffId = sniffId,
+                            TextId = modern.Entry,
+                            Slot = i,
+                            Probability = t.Probability,
+                            Text0 = null,
+                            Text1 = null,
+                            Language = 0,
+                            BroadcastTextId = t.BroadcastTextId
+                        });
+                    }
+                }
+            }
+
+            return menus;
+        }
+
+        /// <summary>
+        /// Area triggers paired with the world change they caused.
+        ///
+        /// Nothing in a capture states that a teleport came from a trigger: the client reports
+        /// crossing one and the server answers with a new world some packets later. The pairing
+        /// is therefore by adjacency, and the delay is written down rather than assumed away -
+        /// a trigger followed within a second or two is a teleport, a trigger followed a minute
+        /// later is the player having walked to a portal in between. Filter on delay_ms.
+        /// </summary>
+        private List<AreaTriggerTeleportRecord> CollectAreaTriggerTeleports(ulong sniffId, Packets packets)
+        {
+            var teleports = new List<AreaTriggerTeleportRecord>();
+            if (packets == null || MovementHandler.WorldPorts.Count == 0)
+                return teleports;
+
+            // The window a teleport has to land in. Generous enough for a loading screen on a
+            // slow disk, short enough that an unrelated later port cannot be attributed here.
+            var window = TimeSpan.FromSeconds(30);
+
+            var ports = MovementHandler.WorldPorts;
+            var next = 0;
+
+            foreach (var holder in packets.Packets_)
+            {
+                var trigger = holder.ClientAreaTrigger;
+                if (trigger == null || !trigger.Enter)
+                    continue;
+
+                var time = holder.BaseData?.Time?.ToDateTime();
+                if (time == null)
+                    continue;
+
+                while (next < ports.Count && ports[next].Time < time.Value)
+                    next++;
+
+                if (next >= ports.Count)
+                    break;
+
+                var port = ports[next];
+                var delay = port.Time - time.Value;
+                if (delay > window)
+                    continue;
+
+                var from = next > 0 ? ports[next - 1] : null;
+
+                teleports.Add(new AreaTriggerTeleportRecord
+                {
+                    SniffId = sniffId,
+                    AreaTriggerId = trigger.AreaTrigger,
+                    FromMap = from?.Map ?? 0,
+                    FromX = from?.PositionX ?? 0,
+                    FromY = from?.PositionY ?? 0,
+                    FromZ = from?.PositionZ ?? 0,
+                    ToMap = port.Map,
+                    ToX = port.PositionX,
+                    ToY = port.PositionY,
+                    ToZ = port.PositionZ,
+                    ToOrientation = port.Orientation,
+                    DelayMs = (int)delay.TotalMilliseconds,
+                    SeenUtc = time
+                });
+            }
+
+            return teleports;
+        }
+
         private List<CreatureSpawnRecord> CollectCreatureSpawns(ulong sniffId)
         {
             var spawns = new List<CreatureSpawnRecord>();

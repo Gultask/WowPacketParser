@@ -34,6 +34,13 @@
         public int GameObjectSpawns;
         public int Waypoints;
         public int LootInstances;
+        public int CreatureSpells;
+
+        /// <summary>Packets that arrived while the client was on this map, parsed or gated.</summary>
+        public int Packets;
+
+        /// <summary>How many of those never reached a handler because the map was not wanted.</summary>
+        public int GatedPackets;
     }
 
     /// <summary>
@@ -47,12 +54,26 @@
         public const string CreatureWaypoint = "creature_waypoint";
         public const string Loot = "loot";
         public const string CreatureMovement = "creature_movement";
+        public const string CreatureSpell = "creature_spell_cast";
+        public const string SpellTarget = "spell_target";
+        public const string SpellDestination = "spell_destination";
+        public const string CreatureEquip = "creature_equip";
+        public const string CreatureAura = "creature_aura";
+        public const string Gossip = "gossip";
+        public const string AreaTriggerTeleport = "areatrigger_teleport";
 
         public const int CreatureSpawnVersion = 3;   // 2 added emote/stand/sheathe state, 3 added health
         public const int GameObjectSpawnVersion = 2;   // 2 added the static rotation quaternion
         public const int CreatureWaypointVersion = 2;   // 2 added segment point counts
         public const int LootVersion = 1;
         public const int CreatureMovementVersion = 1;
+        public const int CreatureSpellVersion = 1;
+        public const int SpellTargetVersion = 1;
+        public const int SpellDestinationVersion = 1;
+        public const int CreatureEquipVersion = 1;
+        public const int CreatureAuraVersion = 1;
+        public const int GossipVersion = 1;
+        public const int AreaTriggerTeleportVersion = 1;
 
         public const string StatusOk = "ok";
         public const string StatusEmpty = "empty";

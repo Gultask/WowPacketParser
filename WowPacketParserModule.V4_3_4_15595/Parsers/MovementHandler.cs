@@ -119,11 +119,12 @@ namespace WowPacketParserModule.V4_3_4_15595.Parsers
         [Parser(Opcode.SMSG_NEW_WORLD)]
         public static void HandleNewWorld434(Packet packet)
         {
-            packet.ReadSingle("X");
-            packet.ReadSingle("Orientation");
-            packet.ReadSingle("Y");
+            var x434 = packet.ReadSingle("X");
+            var o434 = packet.ReadSingle("Orientation");
+            var y434 = packet.ReadSingle("Y");
             CoreParsers.MovementHandler.CurrentMapId = (uint)packet.ReadInt32<MapId>("MapID");
-            packet.ReadSingle("Z"); // seriously...
+            var z434 = packet.ReadSingle("Z"); // seriously...
+            CoreParsers.MovementHandler.RecordWorldPort(packet, new Vector4(x434, y434, z434, o434));
 
             packet.AddSniffData(StoreNameType.Map, (int)CoreParsers.MovementHandler.CurrentMapId, "NEW_WORLD");
         }

@@ -10,7 +10,7 @@ namespace WowPacketParserModule.V2_5_1_38707.Parsers
 {
     public static class SpellHandler
     {
-        public static void ReadSpellCastData(Packet packet, params object[] idx)
+        public static PacketSpellData ReadSpellCastData(Packet packet, params object[] idx)
         {
             var dbdata = new PacketSpellData();
             packet.ReadPackedGuid128("CasterGUID", idx);
@@ -71,18 +71,24 @@ namespace WowPacketParserModule.V2_5_1_38707.Parsers
 
             if (hasAmmoInventoryType)
                 dbdata.AmmoInventoryType = (uint)packet.ReadByteE<InventoryType>("InventoryType", idx);
+
+            return dbdata;
         }
 
         [Parser(Opcode.SMSG_SPELL_START)]
         public static void HandleSpellStart(Packet packet)
         {
-            ReadSpellCastData(packet, "Cast");
+            PacketSpellStart packetSpellStart = new();
+            packetSpellStart.Data = ReadSpellCastData(packet, "Cast");
+            packet.Holder.SpellStart = packetSpellStart;
         }
 
         [Parser(Opcode.SMSG_SPELL_GO)]
         public static void HandleSpellGo(Packet packet)
         {
-            ReadSpellCastData(packet, "Cast");
+            PacketSpellGo packetSpellGo = new();
+            packetSpellGo.Data = ReadSpellCastData(packet, "Cast");
+            packet.Holder.SpellGo = packetSpellGo;
 
             packet.ResetBitReader();
             var hasLog = packet.ReadBit();

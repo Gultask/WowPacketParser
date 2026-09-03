@@ -733,7 +733,9 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
         [Parser(Opcode.SMSG_SPELL_START)]
         public static void HandleSpellStart(Packet packet)
         {
-            ReadSpellCastData(packet, "Cast");
+            PacketSpellStart packetSpellStart = new();
+            packetSpellStart.Data = ReadSpellCastData(packet, "Cast");
+            packet.Holder.SpellStart = packetSpellStart;
         }
 
         [Parser(Opcode.SMSG_SPELL_GO)]

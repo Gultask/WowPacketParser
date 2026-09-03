@@ -89,6 +89,11 @@ namespace WowPacketParser
             foreach (var file in files)
             {
                 SessionHandler.ZStreams.Clear();
+                // Both are static and would otherwise carry the previous sniff's world into
+                // this one, which for the gate means judging packets against the wrong map.
+                MovementHandler.CurrentMapId = 0;
+                MovementHandler.WorldPorts.Clear();
+                IngestMapGate.BeginSniff();
                 if (Settings.ClientBuild != Enums.ClientVersionBuild.Zero)
                     ClientVersion.SetVersion(Settings.ClientBuild);
 

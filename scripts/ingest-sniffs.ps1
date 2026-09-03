@@ -56,7 +56,20 @@ param(
     # Skip sniffs showing a world newer than this without parsing them, e.g. 'WrathOfTheLichKing'
     # to keep everything up to and including Wrath Classic 3.4.x. Compares content rather than
     # build numbers, so Burning Crusade Classic is kept despite its very high build.
+    #
+    # Prefer -MapPolicy for a WotLK-and-below corpus: this drops whole sniffs, while the map
+    # policy keeps the parts of a Cataclysm or Shadowlands capture that stand on ground a 3.3.5
+    # server still has - Outland, Northrend, and every dungeon those expansions did not rebuild.
     [string] $MaxContentExpansion = '',
+
+    # Drop packets by the map the client was standing on, before they are parsed. 'wotlk' keeps
+    # only maps that exist in 3.3.5a Map.dbc, which is what makes a Cata+ corpus affordable: a
+    # 4.4.1 capture measured 93.2% of its packets inside Firelands, a map no WotLK server has.
+    [ValidateSet('', 'none', 'wotlk')]
+    [string] $MapPolicy = '',
+
+    # Extra map ids to drop on top of the policy, comma separated.
+    [string] $MapDeny = '',
 
     # Parser worker threads; 0 means one per core. The work is not CPU parallel bound - two
     # threads finish within about a tenth of the time all twelve do - so capping this leaves the
@@ -142,9 +155,15 @@ function Invoke-Parser {
     if ($Files.Count -eq 0) { return }
 
     if ($PSCmdlet.ShouldProcess("$($Files.Count) sniff(s)", 'parse into the ingest database')) {
-        $arguments = @('--DumpFormat', '17')
+        $arguments = @('--DumpFormat', '17', '--IngestDatabase', $Database)
         if ($MaxContentExpansion) {
             $arguments += @('--IngestMaxContentExpansion', $MaxContentExpansion)
+        }
+        if ($MapPolicy) {
+            $arguments += @('--IngestMapPolicy', $MapPolicy)
+        }
+        if ($MapDeny) {
+            $arguments += @('--IngestMapDeny', $MapDeny)
         }
         if ($Threads -gt 0) {
             $arguments += @('--Threads', $Threads)
@@ -155,7 +174,7 @@ function Invoke-Parser {
             $text = "$item"
             # The parser prints a progress fraction per packet; only keep the lines that matter.
             # 'tried to overwrite delegate' is long standing parser noise on Classic builds.
-            if ($text -match 'Recorded as sniff|spawns recorded|waypoints recorded|loot instances recorded|no loot -|Skipped -|WARNING|Could not|rror' -and
+            if ($text -match 'Recorded as sniff|recorded|map gate|no loot -|Skipped -|WARNING|Could not|rror' -and
                 $text -notmatch 'tried to overwrite delegate') {
                 Write-Log $text.Trim()
             }
@@ -313,6 +332,8 @@ catch {
 Write-Log "parser   : $Parser"
 Write-Log "database : $Database"
 if ($MaxContentExpansion) { Write-Log "cutoff   : $MaxContentExpansion and older" }
+if ($MapPolicy) { Write-Log "map gate : $MapPolicy" }
+if ($MapDeny) { Write-Log "map deny : $MapDeny" }
 if ($Threads -gt 0) { Write-Log "threads  : $Threads" }
 if ($ExcludePattern) { Write-Log "exclude  : /$ExcludePattern/" }
 if ($ExcludeListFile) { Write-Log "exclude  : $($script:ExcludeNames.Count / 2) names from $ExcludeListFile" }

@@ -80,7 +80,11 @@ namespace WowPacketParser.SQL
                                         CreatureWaypointTableDdl, LootInstanceTableDdl,
                                         LootInstanceItemTableDdl, MapValidityTableDdl, MapValiditySeed,
                                         SniffCoverageTableDdl, SniffMapTableDdl,
-                                        CreatureMovementTableDdl })
+                                        CreatureMovementTableDdl, CreatureSpellCastTableDdl,
+                                        SpellTargetTableDdl, SpellDestinationTableDdl,
+                                        CreatureEquipTableDdl, CreatureAuraTableDdl,
+                                        GossipMenuTableDdl, GossipMenuOptionTableDdl,
+                                        NpcTextTableDdl, AreaTriggerTeleportTableDdl })
             {
                 using (var cmd = _conn.CreateCommand())
                 {
@@ -294,13 +298,149 @@ CREATE TABLE IF NOT EXISTS `map_validity` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   COMMENT='Which sniffs terrain-match a target. Says nothing about spawn lists - a Northrend sniff from a modern client has valid coordinates but not necessarily the same creatures.';";
 
+        // Generated from 3.3.5a Map.dbc: a map is usable from the branch of the expansion that
+        // introduced it onward, until something rebuilt its terrain. The eight exceptions are
+        // rebuilds - Cataclysm reshaped the old world and four dungeons, Mists did two more.
+        // Every other instance took minor adjustments at most, which is why a Cataclysm capture
+        // of UBRS or Zul'Farrak, or a Shadowlands one of Outland, is still good evidence.
         private const string MapValiditySeed = @"
-INSERT IGNORE INTO `map_validity` (target, map, usable_branches, note) VALUES
-('3.3.5',   0, 'Classic,TBC,WotLK',              'Cataclysm reshaped Eastern Kingdoms'),
-('3.3.5',   1, 'Classic,TBC,WotLK',              'Cataclysm reshaped Kalimdor'),
-('3.3.5', 530, 'TBC,WotLK,Cata,MoP,Retail',      'Outland unchanged since TBC'),
-('3.3.5', 571, 'WotLK,Cata,MoP,Retail',          'Northrend unchanged since WotLK'),
-('3.3.5', 189, 'Classic,TBC,WotLK,Cata',         'Scarlet Monastery rebuilt in MoP');";
+INSERT INTO `map_validity` (target, map, usable_branches, note) VALUES
+('3.3.5',    0, 'Classic,TBC,WotLK', 'Cataclysm reshaped Eastern Kingdoms'),
+('3.3.5',    1, 'Classic,TBC,WotLK', 'Cataclysm reshaped Kalimdor'),
+('3.3.5',   13, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',   25, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',   30, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',   33, 'Classic,TBC,WotLK', 'Cataclysm rebuilt Shadowfang Keep'),
+('3.3.5',   34, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',   35, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',   36, 'Classic,TBC,WotLK', 'Cataclysm rebuilt Deadmines'),
+('3.3.5',   37, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',   42, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',   43, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',   44, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',   47, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',   48, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',   70, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',   90, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  109, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  129, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  169, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  189, 'Classic,TBC,WotLK,Cata', 'Mists rebuilt Scarlet Monastery'),
+('3.3.5',  209, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  229, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  230, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  249, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  269, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  289, 'Classic,TBC,WotLK,Cata', 'Mists rebuilt Scholomance'),
+('3.3.5',  309, 'Classic,TBC,WotLK', 'Cataclysm rebuilt Zul''Gurub'),
+('3.3.5',  329, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  349, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  369, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  389, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  409, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  429, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  449, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  450, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  451, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  469, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  489, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  509, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  529, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  530, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  531, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  532, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  533, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  534, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  540, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  542, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  543, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  544, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  545, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  546, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  547, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  548, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  550, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  552, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  553, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  554, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  555, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  556, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  557, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  558, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  559, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  560, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  562, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  564, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  565, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  566, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  568, 'TBC,WotLK', 'Cataclysm rebuilt Zul''Aman'),
+('3.3.5',  571, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  572, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  573, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  574, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  575, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  576, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  578, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  580, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  582, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  584, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  585, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  586, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  587, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  588, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  589, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  590, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  591, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  592, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  593, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  594, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  595, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  596, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  597, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  598, 'TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  599, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  600, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  601, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  602, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  603, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  604, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  605, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  606, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  607, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  608, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  609, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  610, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  612, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  613, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  614, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  615, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  616, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  617, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  618, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  619, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  620, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  621, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  622, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  623, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  624, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  628, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  631, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  632, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  641, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  642, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  647, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  649, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  650, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  658, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  668, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  672, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  673, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  712, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  713, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  718, 'WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  723, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  724, 'WotLK,Cata,MoP,Retail', NULL)
+ON DUPLICATE KEY UPDATE usable_branches = VALUES(usable_branches), note = VALUES(note);";
 
         private const string SniffCoverageTableDdl = @"
 CREATE TABLE IF NOT EXISTS `sniff_coverage` (
@@ -324,6 +464,9 @@ CREATE TABLE IF NOT EXISTS `sniff_map` (
   `gameobject_spawns` INT             NOT NULL DEFAULT 0,
   `waypoints`         INT             NOT NULL DEFAULT 0,
   `loot_instances`    INT             NOT NULL DEFAULT 0,
+  `creature_spells`   INT             NOT NULL DEFAULT 0,
+  `packets`           INT             NOT NULL DEFAULT 0 COMMENT 'packets that arrived on this map, gated or not',
+  `gated_packets`     INT             NOT NULL DEFAULT 0 COMMENT 'of those, never handed to a handler',
   PRIMARY KEY (`sniff_id`, `map`),
   KEY `ix_sniffmap_map` (`map`),
   CONSTRAINT `fk_sniffmap_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
@@ -628,14 +771,301 @@ ON DUPLICATE KEY UPDATE
             return SaveRows("sniff_coverage", sniffId, SniffCoverageColumns, rows);
         }
 
+
+        private const string CreatureSpellCastTableDdl = @"
+CREATE TABLE IF NOT EXISTS `creature_spell_cast` (
+  `id`          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `sniff_id`    BIGINT UNSIGNED NOT NULL,
+  `guid`        VARCHAR(40)     NOT NULL,
+  `entry`       INT UNSIGNED    NOT NULL,
+  `map`         INT UNSIGNED    NOT NULL,
+  `spell_id`    INT UNSIGNED    NOT NULL,
+  `started_utc` DATETIME(3)     NULL,
+  `completed`   TINYINT(1)      NOT NULL COMMENT 'a matching SMSG_SPELL_GO arrived',
+  PRIMARY KEY (`id`),
+  KEY `ix_cast_gap` (`sniff_id`, `guid`, `spell_id`, `started_utc`),
+  KEY `ix_cast_entry` (`entry`, `spell_id`),
+  KEY `ix_cast_spell` (`spell_id`),
+  CONSTRAINT `fk_cast_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Every SMSG_SPELL_START by a creature - when it decided to cast, which is when the cooldown expired. Raw on purpose: the gap between two starts is the timer observation, the timers have no upper bound, and which quantile stands in for a max belongs to whoever derives them. Take gaps per guid, never per entry: two creatures of one entry cast independently and interleaving them invents gaps no cooldown could produce. See scripts/spell-timers.sql.';";
+
+        private const string SpellTargetTableDdl = @"
+CREATE TABLE IF NOT EXISTS `spell_target` (
+  `sniff_id`     BIGINT UNSIGNED NOT NULL,
+  `spell_id`     INT UNSIGNED    NOT NULL,
+  `caster_entry` INT UNSIGNED    NOT NULL,
+  `caster_type`  VARCHAR(16)     NULL,
+  `target_entry` INT UNSIGNED    NOT NULL,
+  `target_type`  VARCHAR(16)     NULL,
+  `hits`         INT             NOT NULL,
+  PRIMARY KEY (`sniff_id`, `spell_id`, `caster_entry`, `target_entry`),
+  KEY `ix_starget_spell` (`spell_id`, `target_entry`),
+  CONSTRAINT `fk_starget_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Which entries a spell actually landed on. The empirical answer to what an entry-targeted spell points at: Spell.dbc names no entry for TARGET_UNIT_NEARBY_ENTRY because the entry lives in the server tables, but SMSG_SPELL_GO lists what was hit.';";
+
+        private const string SpellDestinationTableDdl = @"
+CREATE TABLE IF NOT EXISTS `spell_destination` (
+  `sniff_id`     BIGINT UNSIGNED NOT NULL,
+  `spell_id`     INT UNSIGNED    NOT NULL,
+  `caster_entry` INT UNSIGNED    NOT NULL,
+  `map`          INT UNSIGNED    NOT NULL,
+  `position_x`   FLOAT           NOT NULL,
+  `position_y`   FLOAT           NOT NULL,
+  `position_z`   FLOAT           NOT NULL,
+  `orientation`  FLOAT           NULL,
+  `casts`        INT             NOT NULL,
+  PRIMARY KEY (`sniff_id`, `spell_id`, `caster_entry`, `position_x`, `position_y`, `position_z`),
+  KEY `ix_sdest_spell` (`spell_id`),
+  CONSTRAINT `fk_sdest_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Where a spell was aimed when it was aimed at ground rather than a unit - the observations a spell_target_position row is built from.';";
+
+        private const string CreatureEquipTableDdl = @"
+CREATE TABLE IF NOT EXISTS `creature_equip` (
+  `sniff_id` BIGINT UNSIGNED NOT NULL,
+  `guid`     VARCHAR(40)     NOT NULL,
+  `entry`    INT UNSIGNED    NOT NULL,
+  `map`      INT UNSIGNED    NOT NULL,
+  `item_id1` INT UNSIGNED    NOT NULL,
+  `item_id2` INT UNSIGNED    NOT NULL,
+  `item_id3` INT UNSIGNED    NOT NULL,
+  PRIMARY KEY (`sniff_id`, `guid`),
+  KEY `ix_cequip_entry` (`entry`),
+  CONSTRAINT `fk_cequip_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Virtual items a creature was drawn holding: main hand, off hand, ranged.';";
+
+        private const string CreatureAuraTableDdl = @"
+CREATE TABLE IF NOT EXISTS `creature_aura` (
+  `sniff_id`        BIGINT UNSIGNED NOT NULL,
+  `guid`            VARCHAR(40)     NOT NULL,
+  `entry`           INT UNSIGNED    NOT NULL,
+  `map`             INT UNSIGNED    NOT NULL,
+  `spell_id`        INT UNSIGNED    NOT NULL,
+  `self_cast`       TINYINT(1)      NOT NULL,
+  `on_create`       TINYINT(1)      NOT NULL COMMENT 'already present in the block that created the creature',
+  `observations`    INT             NOT NULL,
+  `max_duration_ms` INT             NULL COMMENT 'null or negative means permanent',
+  PRIMARY KEY (`sniff_id`, `guid`, `spell_id`),
+  KEY `ix_caura_entry` (`entry`, `spell_id`),
+  CONSTRAINT `fk_caura_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Auras seen on creatures. on_create with a permanent duration is what a spawn is meant to start with; anything else may be a player acting on it.';";
+
+        private const string GossipMenuTableDdl = @"
+CREATE TABLE IF NOT EXISTS `gossip_menu` (
+  `sniff_id`       BIGINT UNSIGNED NOT NULL,
+  `menu_id`        INT UNSIGNED    NOT NULL,
+  `text_id`        INT UNSIGNED    NOT NULL,
+  `creature_entry` INT UNSIGNED    NOT NULL,
+  `observations`   INT             NOT NULL,
+  PRIMARY KEY (`sniff_id`, `menu_id`, `text_id`, `creature_entry`),
+  KEY `ix_gmenu_menu` (`menu_id`),
+  KEY `ix_gmenu_entry` (`creature_entry`),
+  CONSTRAINT `fk_gmenu_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+
+        private const string GossipMenuOptionTableDdl = @"
+CREATE TABLE IF NOT EXISTS `gossip_menu_option` (
+  `sniff_id`     BIGINT UNSIGNED NOT NULL,
+  `menu_id`      INT UNSIGNED    NOT NULL,
+  `option_index` INT UNSIGNED    NOT NULL,
+  `option_icon`  INT             NOT NULL,
+  `option_text`  TEXT            NULL,
+  `box_money`    INT UNSIGNED    NOT NULL,
+  `box_coded`    TINYINT(1)      NOT NULL,
+  `box_text`     TEXT            NULL,
+  PRIMARY KEY (`sniff_id`, `menu_id`, `option_index`),
+  KEY `ix_gopt_menu` (`menu_id`),
+  CONSTRAINT `fk_gopt_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+
+        private const string NpcTextTableDdl = @"
+CREATE TABLE IF NOT EXISTS `npc_text` (
+  `sniff_id`          BIGINT UNSIGNED NOT NULL,
+  `text_id`           INT UNSIGNED    NOT NULL,
+  `slot`              INT             NOT NULL,
+  `probability`       FLOAT           NOT NULL,
+  `text0`             TEXT            NULL,
+  `text1`             TEXT            NULL,
+  `language`          INT UNSIGNED    NOT NULL,
+  `broadcast_text_id` INT UNSIGNED    NOT NULL,
+  PRIMARY KEY (`sniff_id`, `text_id`, `slot`),
+  KEY `ix_npctext_text` (`text_id`),
+  CONSTRAINT `fk_npctext_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+
+        private const string AreaTriggerTeleportTableDdl = @"
+CREATE TABLE IF NOT EXISTS `areatrigger_teleport` (
+  `id`              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `sniff_id`        BIGINT UNSIGNED NOT NULL,
+  `areatrigger_id`  INT UNSIGNED    NOT NULL,
+  `from_map`        INT UNSIGNED    NOT NULL,
+  `from_x`          FLOAT           NOT NULL,
+  `from_y`          FLOAT           NOT NULL,
+  `from_z`          FLOAT           NOT NULL,
+  `to_map`          INT UNSIGNED    NOT NULL,
+  `to_x`            FLOAT           NOT NULL,
+  `to_y`            FLOAT           NOT NULL,
+  `to_z`            FLOAT           NOT NULL,
+  `to_orientation`  FLOAT           NOT NULL,
+  `delay_ms`        INT             NOT NULL COMMENT 'trigger to new world; a long delay means the pairing is a guess',
+  `seen_utc`        DATETIME(3)     NULL,
+  PRIMARY KEY (`id`),
+  KEY `ix_attele_sniff` (`sniff_id`),
+  KEY `ix_attele_trigger` (`areatrigger_id`),
+  CONSTRAINT `fk_attele_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='A client area trigger paired with the world change it produced. The teleport is never in one packet, so the pairing is by adjacency in time and delay_ms is how much to trust it.';";
+
+        private const string CreatureSpellCastColumns =
+            "guid, entry, map, spell_id, started_utc, completed";
+
+        public static int SaveCreatureSpellCasts(ulong sniffId, IReadOnlyList<CreatureSpellCastRecord> casts)
+        {
+            var rows = new List<object[]>(casts.Count);
+            foreach (var c in casts)
+                rows.Add(new object[] { c.Guid, c.Entry, c.Map, c.SpellId, c.StartedUtc, c.Completed ? 1 : 0 });
+
+            return SaveRows("creature_spell_cast", sniffId, CreatureSpellCastColumns, rows, 1000);
+        }
+
+        private const string SpellTargetColumns =
+            "spell_id, caster_entry, caster_type, target_entry, target_type, hits";
+
+        public static int SaveSpellTargets(ulong sniffId, IReadOnlyList<SpellTargetRecord> targets)
+        {
+            var rows = new List<object[]>(targets.Count);
+            foreach (var t in targets)
+                rows.Add(new object[] { t.SpellId, t.CasterEntry, t.CasterType, t.TargetEntry, t.TargetType, t.Hits });
+
+            return SaveRows("spell_target", sniffId, SpellTargetColumns, rows, 1000);
+        }
+
+        private const string SpellDestinationColumns =
+            "spell_id, caster_entry, map, position_x, position_y, position_z, orientation, casts";
+
+        public static int SaveSpellDestinations(ulong sniffId, IReadOnlyList<SpellDestinationRecord> dests)
+        {
+            var rows = new List<object[]>(dests.Count);
+            foreach (var d in dests)
+            {
+                rows.Add(new object[]
+                {
+                    d.SpellId, d.CasterEntry, d.Map, d.PositionX, d.PositionY, d.PositionZ,
+                    d.Orientation, d.Casts
+                });
+            }
+
+            return SaveRows("spell_destination", sniffId, SpellDestinationColumns, rows, 1000);
+        }
+
+        private const string CreatureEquipColumns = "guid, entry, map, item_id1, item_id2, item_id3";
+
+        public static int SaveCreatureEquipment(ulong sniffId, IReadOnlyList<CreatureEquipRecord> equip)
+        {
+            var rows = new List<object[]>(equip.Count);
+            foreach (var e in equip)
+                rows.Add(new object[] { e.Guid, e.Entry, e.Map, e.ItemId1, e.ItemId2, e.ItemId3 });
+
+            return SaveRows("creature_equip", sniffId, CreatureEquipColumns, rows);
+        }
+
+        private const string CreatureAuraColumns =
+            "guid, entry, map, spell_id, self_cast, on_create, observations, max_duration_ms";
+
+        public static int SaveCreatureAuras(ulong sniffId, IReadOnlyList<CreatureAuraRecord> auras)
+        {
+            var rows = new List<object[]>(auras.Count);
+            foreach (var a in auras)
+            {
+                rows.Add(new object[]
+                {
+                    a.Guid, a.Entry, a.Map, a.SpellId, a.SelfCast ? 1 : 0, a.OnCreate ? 1 : 0,
+                    a.Observations, a.MaxDurationMs
+                });
+            }
+
+            return SaveRows("creature_aura", sniffId, CreatureAuraColumns, rows, 1000);
+        }
+
+        private const string GossipMenuColumns = "menu_id, text_id, creature_entry, observations";
+
+        public static int SaveGossipMenus(ulong sniffId, IReadOnlyList<GossipMenuRecord> menus)
+        {
+            var rows = new List<object[]>(menus.Count);
+            foreach (var m in menus)
+                rows.Add(new object[] { m.MenuId, m.TextId, m.CreatureEntry, m.Observations });
+
+            return SaveRows("gossip_menu", sniffId, GossipMenuColumns, rows);
+        }
+
+        private const string GossipMenuOptionColumns =
+            "menu_id, option_index, option_icon, option_text, box_money, box_coded, box_text";
+
+        public static int SaveGossipMenuOptions(ulong sniffId, IReadOnlyList<GossipMenuOptionRecord> options)
+        {
+            var rows = new List<object[]>(options.Count);
+            foreach (var o in options)
+            {
+                rows.Add(new object[]
+                {
+                    o.MenuId, o.OptionIndex, o.OptionIcon, o.OptionText, o.BoxMoney,
+                    o.BoxCoded ? 1 : 0, o.BoxText
+                });
+            }
+
+            return SaveRows("gossip_menu_option", sniffId, GossipMenuOptionColumns, rows);
+        }
+
+        private const string NpcTextColumns =
+            "text_id, slot, probability, text0, text1, language, broadcast_text_id";
+
+        public static int SaveNpcTexts(ulong sniffId, IReadOnlyList<NpcTextRecord> texts)
+        {
+            var rows = new List<object[]>(texts.Count);
+            foreach (var t in texts)
+            {
+                rows.Add(new object[]
+                {
+                    t.TextId, t.Slot, t.Probability, t.Text0, t.Text1, t.Language, t.BroadcastTextId
+                });
+            }
+
+            return SaveRows("npc_text", sniffId, NpcTextColumns, rows);
+        }
+
+        private const string AreaTriggerTeleportColumns =
+            "areatrigger_id, from_map, from_x, from_y, from_z, to_map, to_x, to_y, to_z, " +
+            "to_orientation, delay_ms, seen_utc";
+
+        public static int SaveAreaTriggerTeleports(ulong sniffId, IReadOnlyList<AreaTriggerTeleportRecord> teleports)
+        {
+            var rows = new List<object[]>(teleports.Count);
+            foreach (var t in teleports)
+            {
+                rows.Add(new object[]
+                {
+                    t.AreaTriggerId, t.FromMap, t.FromX, t.FromY, t.FromZ,
+                    t.ToMap, t.ToX, t.ToY, t.ToZ, t.ToOrientation, t.DelayMs, t.SeenUtc
+                });
+            }
+
+            return SaveRows("areatrigger_teleport", sniffId, AreaTriggerTeleportColumns, rows);
+        }
+
         private const string SniffMapColumns =
-            "map, creature_spawns, gameobject_spawns, waypoints, loot_instances";
+            "map, creature_spawns, gameobject_spawns, waypoints, loot_instances, creature_spells, " +
+            "packets, gated_packets";
 
         public static int SaveSniffMaps(ulong sniffId, IReadOnlyList<SniffMapRecord> maps)
         {
             var rows = new List<object[]>(maps.Count);
             foreach (var m in maps)
-                rows.Add(new object[] { m.Map, m.CreatureSpawns, m.GameObjectSpawns, m.Waypoints, m.LootInstances });
+                rows.Add(new object[] { m.Map, m.CreatureSpawns, m.GameObjectSpawns, m.Waypoints,
+                                        m.LootInstances, m.CreatureSpells, m.Packets, m.GatedPackets });
 
             return SaveRows("sniff_map", sniffId, SniffMapColumns, rows);
         }

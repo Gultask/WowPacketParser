@@ -63,6 +63,18 @@ namespace WowPacketParser.Misc
         public string FileName { get; }
         public ParsedStatus Status { get; set; }
         public bool WriteToFile { get; private set; }
+
+        /// <summary>
+        /// Set by <see cref="IngestMapGate"/>: this packet arrived on a map that is not being
+        /// kept, so no handler will ever see it.
+        /// </summary>
+        public bool Gated { get; set; }
+
+        /// <summary>
+        /// Set when the packet was parsed on the reader thread, in file order, because
+        /// something downstream needed its result before the parallel stage could run.
+        /// </summary>
+        public bool ParsedInReader { get; set; }
         public int ConnectionIndex { get; set; }
         public IPEndPoint EndPoint { get; set; }
 

@@ -416,7 +416,7 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
         public static void HandleLoginVerifyWorld(Packet packet)
         {
             CoreParsers.MovementHandler.CurrentMapId = (uint)packet.ReadInt32<MapId>("Map");
-            packet.ReadVector4("Position");
+            CoreParsers.MovementHandler.RecordWorldPort(packet, packet.ReadVector4("Position"));
             packet.ReadUInt32("Reason");
         }
 
