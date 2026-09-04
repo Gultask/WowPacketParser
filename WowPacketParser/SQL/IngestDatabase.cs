@@ -84,7 +84,10 @@ namespace WowPacketParser.SQL
                                         SpellTargetTableDdl, SpellDestinationTableDdl,
                                         CreatureEquipTableDdl, CreatureAuraTableDdl,
                                         GossipMenuTableDdl, GossipMenuOptionTableDdl,
-                                        NpcTextTableDdl, AreaTriggerTeleportTableDdl })
+                                        NpcTextTableDdl, AreaTriggerTeleportTableDdl,
+                                        NpcVendorTableDdl, NpcSpellClickTableDdl,
+                                        CreatureTemplateSpellTableDdl, CreatureQuestItemTableDdl,
+                                        CreatureGossipTableDdl, CreatureValueTableDdl })
             {
                 using (var cmd = _conn.CreateCommand())
                 {
@@ -95,6 +98,92 @@ namespace WowPacketParser.SQL
 
             _schemaChecked = true;
         }
+
+
+        private const string NpcVendorTableDdl = @"
+CREATE TABLE IF NOT EXISTS `npc_vendor` (
+  `sniff_id`      BIGINT UNSIGNED NOT NULL,
+  `entry`         INT UNSIGNED    NOT NULL,
+  `slot`          INT             NOT NULL COMMENT 'position in the list the player was shown',
+  `item_id`       INT             NOT NULL COMMENT 'negative means a currency, as the client sends it',
+  `max_count`     INT UNSIGNED    NOT NULL COMMENT '0 is unlimited stock',
+  `extended_cost` INT UNSIGNED    NOT NULL,
+  `type`          INT UNSIGNED    NOT NULL COMMENT '1 item, 2 currency',
+  PRIMARY KEY (`sniff_id`, `entry`, `slot`, `item_id`),
+  KEY `ix_nvendor_entry` (`entry`),
+  KEY `ix_nvendor_item` (`item_id`),
+  CONSTRAINT `fk_nvendor_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='A vendor list as the client was shown it. Stock is what the vendor had at that moment, not necessarily its full list.';";
+
+        private const string NpcSpellClickTableDdl = @"
+CREATE TABLE IF NOT EXISTS `npc_spellclick` (
+  `sniff_id`   BIGINT UNSIGNED NOT NULL,
+  `entry`      INT UNSIGNED    NOT NULL,
+  `spell_id`   INT UNSIGNED    NOT NULL,
+  `cast_flags` INT UNSIGNED    NOT NULL,
+  `delay_ms`   INT             NOT NULL COMMENT 'click to cast; a large delay means the pairing is a guess',
+  PRIMARY KEY (`sniff_id`, `entry`, `spell_id`),
+  KEY `ix_nclick_entry` (`entry`),
+  CONSTRAINT `fk_nclick_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='A spell click and the cast it produced. Two packets, paired by time, so delay_ms is how much to trust the row.';";
+
+        private const string CreatureTemplateSpellTableDdl = @"
+CREATE TABLE IF NOT EXISTS `creature_template_spell` (
+  `sniff_id` BIGINT UNSIGNED NOT NULL,
+  `entry`    INT UNSIGNED    NOT NULL,
+  `idx`      INT             NOT NULL COMMENT 'action bar slot, not a rank',
+  `spell_id` INT UNSIGNED    NOT NULL,
+  `source`   VARCHAR(24)     NOT NULL COMMENT 'which of the three branch spellings this came from',
+  PRIMARY KEY (`sniff_id`, `entry`, `idx`, `spell_id`),
+  KEY `ix_ctspell_entry` (`entry`),
+  KEY `ix_ctspell_spell` (`spell_id`),
+  CONSTRAINT `fk_ctspell_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='The action bar sent when a creature is controlled - mind control, charm or vehicle. The only place a creature spell list arrives whole and in slot order.';";
+
+        private const string CreatureQuestItemTableDdl = @"
+CREATE TABLE IF NOT EXISTS `creature_quest_item` (
+  `sniff_id` BIGINT UNSIGNED NOT NULL,
+  `entry`    INT UNSIGNED    NOT NULL,
+  `idx`      INT UNSIGNED    NOT NULL,
+  `item_id`  INT UNSIGNED    NOT NULL,
+  PRIMARY KEY (`sniff_id`, `entry`, `idx`),
+  KEY `ix_cqitem_entry` (`entry`),
+  KEY `ix_cqitem_item` (`item_id`),
+  CONSTRAINT `fk_cqitem_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Quest drops declared by the creature query response.';";
+
+        private const string CreatureGossipTableDdl = @"
+CREATE TABLE IF NOT EXISTS `creature_gossip` (
+  `sniff_id` BIGINT UNSIGNED NOT NULL,
+  `entry`    INT UNSIGNED    NOT NULL,
+  `menu_id`  INT UNSIGNED    NOT NULL,
+  PRIMARY KEY (`sniff_id`, `entry`, `menu_id`),
+  KEY `ix_cgossip_entry` (`entry`),
+  KEY `ix_cgossip_menu` (`menu_id`),
+  CONSTRAINT `fk_cgossip_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Which gossip menu a creature opened with. One entry can have more than one, by condition.';";
+
+        private const string CreatureValueTableDdl = @"
+CREATE TABLE IF NOT EXISTS `creature_value` (
+  `sniff_id`     BIGINT UNSIGNED NOT NULL,
+  `guid`         VARCHAR(40)     NOT NULL,
+  `entry`        INT UNSIGNED    NOT NULL,
+  `map`          INT UNSIGNED    NOT NULL,
+  `field`        VARCHAR(24)     NOT NULL,
+  `value`        BIGINT          NOT NULL,
+  `on_create`    TINYINT(1)      NOT NULL COMMENT 'arrived in the block that created the creature, so it is what the spawn started with',
+  `observations` INT             NOT NULL,
+  PRIMARY KEY (`sniff_id`, `guid`, `field`, `value`),
+  KEY `ix_cvalue_entry` (`entry`, `field`, `value`),
+  KEY `ix_cvalue_field` (`field`, `value`),
+  CONSTRAINT `fk_cvalue_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='One row per distinct value a guid was seen carrying. Long format because none of these are constants: faction changes when a quest giver turns hostile, and two guids of one entry can differ for a whole sniff. Resistances are PRIVATE|OWNER|SPECIAL_INFO, so their absence is not zero.';";
 
         private const string SniffTableDdl = @"
 CREATE TABLE IF NOT EXISTS `sniff` (
@@ -961,6 +1050,77 @@ CREATE TABLE IF NOT EXISTS `areatrigger_teleport` (
             }
 
             return SaveRows("spell_destination", sniffId, SpellDestinationColumns, rows, 1000);
+        }
+
+        private const string NpcVendorColumns = "entry, slot, item_id, max_count, extended_cost, type";
+
+        public static int SaveNpcVendors(ulong sniffId, IReadOnlyList<NpcVendorRecord> vendors)
+        {
+            var rows = new List<object[]>(vendors.Count);
+            foreach (var v in vendors)
+                rows.Add(new object[] { v.Entry, v.Slot, v.ItemId, v.MaxCount, v.ExtendedCost, v.Type });
+
+            return SaveRows("npc_vendor", sniffId, NpcVendorColumns, rows);
+        }
+
+        private const string NpcSpellClickColumns = "entry, spell_id, cast_flags, delay_ms";
+
+        public static int SaveNpcSpellClicks(ulong sniffId, IReadOnlyList<NpcSpellClickRecord> clicks)
+        {
+            var rows = new List<object[]>(clicks.Count);
+            foreach (var c in clicks)
+                rows.Add(new object[] { c.Entry, c.SpellId, c.CastFlags, c.DelayMs });
+
+            return SaveRows("npc_spellclick", sniffId, NpcSpellClickColumns, rows);
+        }
+
+        private const string CreatureTemplateSpellColumns = "entry, idx, spell_id, source";
+
+        public static int SaveCreatureTemplateSpells(ulong sniffId, IReadOnlyList<CreatureTemplateSpellRecord> spells)
+        {
+            var rows = new List<object[]>(spells.Count);
+            foreach (var s in spells)
+                rows.Add(new object[] { s.Entry, s.Index, s.SpellId, s.Source });
+
+            return SaveRows("creature_template_spell", sniffId, CreatureTemplateSpellColumns, rows);
+        }
+
+        private const string CreatureQuestItemColumns = "entry, idx, item_id";
+
+        public static int SaveCreatureQuestItems(ulong sniffId, IReadOnlyList<CreatureQuestItemRecord> items)
+        {
+            var rows = new List<object[]>(items.Count);
+            foreach (var i in items)
+                rows.Add(new object[] { i.Entry, i.Index, i.ItemId });
+
+            return SaveRows("creature_quest_item", sniffId, CreatureQuestItemColumns, rows);
+        }
+
+        private const string CreatureGossipColumns = "entry, menu_id";
+
+        public static int SaveCreatureGossips(ulong sniffId, IReadOnlyList<CreatureGossipRecord> gossips)
+        {
+            var rows = new List<object[]>(gossips.Count);
+            foreach (var g in gossips)
+                rows.Add(new object[] { g.Entry, g.MenuId });
+
+            return SaveRows("creature_gossip", sniffId, CreatureGossipColumns, rows);
+        }
+
+        private const string CreatureValueColumns = "guid, entry, map, field, value, on_create, observations";
+
+        public static int SaveCreatureValues(ulong sniffId, IReadOnlyList<CreatureValueRecord> values)
+        {
+            var rows = new List<object[]>(values.Count);
+            foreach (var v in values)
+            {
+                rows.Add(new object[]
+                {
+                    v.Guid, v.Entry, v.Map, v.Field, v.Value, v.OnCreate ? 1 : 0, v.Observations
+                });
+            }
+
+            return SaveRows("creature_value", sniffId, CreatureValueColumns, rows, 1000);
         }
 
         private const string CreatureEquipColumns = "guid, entry, map, item_id1, item_id2, item_id3";

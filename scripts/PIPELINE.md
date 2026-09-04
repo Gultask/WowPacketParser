@@ -130,7 +130,23 @@ that evidence comes from.
 
 Beyond spawns, waypoints and loot: `creature_spell_cast` (every SMSG_SPELL_START by a creature,
 raw), `spell_target`, `spell_destination`, `creature_equip`, `creature_aura`, `gossip_menu`,
-`gossip_menu_option`, `npc_text` and `areatrigger_teleport`. `scripts/TABLES.md` says what each
+`gossip_menu_option`, `npc_text`, `areatrigger_teleport`, `npc_vendor`, `npc_spellclick`,
+`creature_template_spell`, `creature_quest_item`, `creature_gossip` and `creature_value`.
+
+**A trap worth knowing about.** Most of those last six read from `Storage` bags that the parser
+switches off unless their `SQLOutput` flag is set - `StoreBag.Add` is a no-op when disabled - and
+the ingest sets none of them, so the bags were silently empty. Database mode now turns on exactly
+the five outputs its collectors read (`creature_template`, `creature_template_gossip`,
+`creature_spell_list`, `npc_vendor`, `npc_spellclick_spells`) and no more, because enabling the
+lot would collect quest, item and hotfix data nothing here reads.
+
+**And a second one.** `creature_template_spell` is the action bar the server sends for a
+controlled creature, and three branches spell it three ways: WotLK Classic fills
+`CreatureTemplateSpells`, Cata Classic fills `CreatureSpellLists`, and the legacy handler fills
+`SpellsX`. The collector reads all three. Reading one would have returned nothing for two thirds
+of the corpus while looking like it worked.
+
+`scripts/TABLES.md` says what each
 one holds and which of the old database's 53 tables are worth keeping.
 
 Loot refuses to run on Mists and later: area looting lets one response cover several corpses, so

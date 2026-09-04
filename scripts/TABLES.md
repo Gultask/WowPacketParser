@@ -29,6 +29,43 @@ the only tables that cannot be rebuilt without re-reading the sniffs, which take
 | `creature_aura` | sniff × creature × spell | with a flag for auras present at creation |
 | `gossip_menu` / `gossip_menu_option` / `npc_text` | menu, option, text | as the server sent them |
 | `areatrigger_teleport` | trigger paired to a world change | `delay_ms` says how much to trust the pairing |
+| `npc_vendor` | sniff × vendor × slot | the list as the player was shown it |
+| `npc_spellclick` | sniff × creature × spell | click paired to the cast it produced |
+| `creature_template_spell` | sniff × creature × slot | the action bar of a controlled creature |
+| `creature_quest_item` | sniff × creature × index | quest drops from the creature query response |
+| `creature_gossip` | sniff × creature × menu | which menu a creature opened with |
+| `creature_value` | sniff × guid × field × value | faction, mount, resistances, npc flags, level, model |
+
+### Why `creature_value` is long format
+
+None of these are constants. Measured on one 3.4.0 questing capture: **19 guids changed
+faction during the sniff** and **8 entries had guids that disagreed with each other**. Storing
+one value per guid would have reported a quest giver's hostile faction as its own. `on_create`
+separates what a spawn started with from what the world did to it afterwards.
+
+Resistances are the extreme case. `UNIT_FIELD_RESISTANCES` is `PRIVATE | OWNER | SPECIAL_INFO`,
+so it arrives only for a unit the player owns or controls: **6 guids out of 2,585 in that same
+capture, none of them on create**. Absence is not zero.
+
+### `creature_spell_cast` and `creature_aura` are not the same table
+
+They overlap, and the overlap is the useful part. On that capture:
+
+| | count |
+|---|---:|
+| distinct guid+spell as an aura | 5,844 |
+| distinct guid+spell as a cast | 2,086 |
+| in both | 888 |
+| auras that guid was never seen casting | 4,956 |
+| on-create permanent auras | 2,486 |
+
+An aura the creature was seen casting is a combat buff it applies to itself, so it does **not**
+belong in `creature_template_addon.auras`; the 4,956 it was never seen casting are the
+candidates, and the 2,486 permanent on-create ones are the strongest of those. The join between
+the two tables is what tells them apart, which is exactly why both are kept.
+
+The cast table also holds 4,642 raw events behind those 2,086 distinct pairs. That surplus is
+the timing - the gaps a cooldown is read from - and the aura table cannot supply it at all.
 
 `sniff_coverage` is the one that is easy to underrate. A sniff that produced no loot because its
 build has no `SMSG_LOOT_RESPONSE` and a sniff that produced no loot because the player looted

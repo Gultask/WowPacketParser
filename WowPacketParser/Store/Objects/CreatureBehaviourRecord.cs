@@ -173,4 +173,98 @@ namespace WowPacketParser.Store.Objects
         public int DelayMs;
         public DateTime? SeenUtc;
     }
+
+    /// <summary>
+    /// A vendor's stock, as the client was shown it. Slot is the position in the list, which
+    /// AzerothCore's npc_vendor ignores but which orders the rows the way the player saw them.
+    /// </summary>
+    public sealed class NpcVendorRecord
+    {
+        public ulong SniffId;
+        public uint Entry;
+        public int Slot;
+        public int ItemId;
+        public uint MaxCount;
+        public uint ExtendedCost;
+        public uint Type;
+    }
+
+    /// <summary>
+    /// A creature that answered a spell click with a cast. The pairing is what makes the row:
+    /// CMSG_SPELL_CLICK names the creature and the SMSG_SPELL_GO that follows names the spell,
+    /// so a click with no cast close behind is not evidence of anything.
+    /// </summary>
+    public sealed class NpcSpellClickRecord
+    {
+        public ulong SniffId;
+        public uint Entry;
+        public uint SpellId;
+        public uint CastFlags;
+        public int DelayMs;
+    }
+
+    /// <summary>
+    /// The action bar the server sends when a creature is controlled - mind control, charm or
+    /// vehicle. This is the only place a creature's own spell list arrives whole and in order,
+    /// which is why the index is kept: it is the slot, not a rank.
+    ///
+    /// Three branches spell this differently. WotLK Classic writes CreatureTemplateSpells with
+    /// an index, Cata Classic writes CreatureSpellLists with a position, and the legacy handler
+    /// writes SpellsX as a bare list per entry. Reading only one of them silently loses whole
+    /// branches, so the collector reads all three and normalises here.
+    /// </summary>
+    public sealed class CreatureTemplateSpellRecord
+    {
+        public ulong SniffId;
+        public uint Entry;
+        public int Index;
+        public uint SpellId;
+        public string Source;
+    }
+
+    /// <summary>An item a creature drops for a quest, from the creature query response.</summary>
+    public sealed class CreatureQuestItemRecord
+    {
+        public ulong SniffId;
+        public uint Entry;
+        public uint Index;
+        public uint ItemId;
+    }
+
+    /// <summary>Which gossip menu a creature opened with.</summary>
+    public sealed class CreatureGossipRecord
+    {
+        public ulong SniffId;
+        public uint Entry;
+        public uint MenuId;
+    }
+
+    /// <summary>
+    /// One value a creature was seen carrying in an update block - faction, mount, resistances,
+    /// npc flags, level, model.
+    ///
+    /// Long format, one row per distinct value, because these are not constants. Faction is the
+    /// clearest case: a quest giver that turns hostile sends a second FactionTemplate later in
+    /// the same sniff, and two guids of one entry can differ from each other for the whole of
+    /// it. Recording only the last value seen would quietly report the hostile faction as the
+    /// creature's own.
+    ///
+    /// on_create separates the two: a value that arrived in the block that created the creature
+    /// is what it spawned with, and anything after that is the world acting on it.
+    ///
+    /// Resistances carry a caveat of their own. UNIT_FIELD_RESISTANCES is PRIVATE | OWNER |
+    /// SPECIAL_INFO, so the server sends it only for a unit the player owns or controls, or when
+    /// the client has special info on the target. Absence is not zero.
+    /// </summary>
+    public sealed class CreatureValueRecord
+    {
+        public ulong SniffId;
+        public string Guid;
+        public uint Entry;
+        public uint Map;
+        public string Field;
+        public long Value;
+        public bool OnCreate;
+        public int Observations;
+    }
 }

@@ -61,6 +61,12 @@
         public const string CreatureAura = "creature_aura";
         public const string Gossip = "gossip";
         public const string AreaTriggerTeleport = "areatrigger_teleport";
+        public const string NpcVendor = "npc_vendor";
+        public const string NpcSpellClick = "npc_spellclick";
+        public const string CreatureTemplateSpell = "creature_template_spell";
+        public const string CreatureQuestItem = "creature_quest_item";
+        public const string CreatureGossip = "creature_gossip";
+        public const string CreatureValue = "creature_value";
 
         public const int CreatureSpawnVersion = 3;   // 2 added emote/stand/sheathe state, 3 added health
         public const int GameObjectSpawnVersion = 2;   // 2 added the static rotation quaternion
@@ -74,6 +80,12 @@
         public const int CreatureAuraVersion = 1;
         public const int GossipVersion = 1;
         public const int AreaTriggerTeleportVersion = 1;
+        public const int NpcVendorVersion = 1;
+        public const int NpcSpellClickVersion = 1;
+        public const int CreatureTemplateSpellVersion = 1;
+        public const int CreatureQuestItemVersion = 1;
+        public const int CreatureGossipVersion = 1;
+        public const int CreatureValueVersion = 1;
 
         public const string StatusOk = "ok";
         public const string StatusEmpty = "empty";
