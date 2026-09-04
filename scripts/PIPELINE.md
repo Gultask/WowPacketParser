@@ -65,8 +65,11 @@ and map 1 in Cataclysm, and they are not the same Kalimdor. A gate that only ask
 map id existed let a 4.4.0 levelling capture through: **320,000 packets, 3,741 spawns and 51,264
 waypoints of rebuilt Kalimdor**, plus its rewritten gossip text. The rule is the same one
 `map_validity` states - one is about cost and the other about what may be used, and both want
-the same answer - so the gate now applies it directly: maps 0, 1, 33, 36, 309 and 568 are
-Cataclysm-and-later rebuilds, 189 and 289 are Mists rebuilds.
+the same answer - so the gate now applies it directly. Thirteen maps have a cut-off: 0, 1, 33,
+36, 109, 309 and 568 stop being 3.3.5 after Cataclysm; 189, 289 and 389 after Mists; 47, 48 and
+229 after Warlords. MoP is the latest cut-off expressible, because `ClientBranch` stops there
+and files everything from Warlords on under `Retail` - enough for every rebuild known to need
+gating.
 
 With that in, the 4.4.1 capture measured above goes from 93.2% dropped to **100.0%** - it only
 ever stood on Firelands and rebuilt old world, so it has nothing to give a 3.3.5 server. A 3.4.3
@@ -113,10 +116,15 @@ a sniff with no attributed packets.
 **Gating is not the same as validity.** The gate is about cost; `map_validity` is about whether
 the data can be used. It now covers all 135 maps: a map is usable from the branch of the
 expansion that introduced it onward, until something rebuilt its terrain. Cataclysm reshaped the
-old world plus Deadmines, Shadowfang Keep, Zul'Gurub and Zul'Aman; Mists rebuilt Scarlet
-Monastery and Scholomance. Everything else took minor adjustments at most - which is why a
-Cataclysm capture of UBRS or Zul'Farrak, or a Shadowlands one of Outland, is good evidence for
-3.3.5, and a Cataclysm capture of Deadmines is not.
+old world plus Deadmines, Shadowfang Keep, Zul'Gurub, Zul'Aman and the Sunken Temple; Mists
+rebuilt Scarlet Monastery, Scholomance and Ragefire Chasm; Warlords did Blackrock Spire,
+Blackfathom Deeps and Razorfen Kraul. Everything else took minor adjustments at most - which is
+why a Cataclysm capture of UBRS or Zul'Farrak, or a Shadowlands one of Outland, is good evidence
+for 3.3.5, and a Cataclysm capture of Deadmines is not.
+
+Map 229 is Lower and Upper Blackrock Spire under one id and Warlords rebuilt only the upper
+half, so the whole map is cut at MoP; the Cataclysm UBRS captures are still kept, which is where
+that evidence comes from.
 
 #### What one sniff now yields
 

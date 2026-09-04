@@ -299,10 +299,11 @@ CREATE TABLE IF NOT EXISTS `map_validity` (
   COMMENT='Which sniffs terrain-match a target. Says nothing about spawn lists - a Northrend sniff from a modern client has valid coordinates but not necessarily the same creatures.';";
 
         // Generated from 3.3.5a Map.dbc: a map is usable from the branch of the expansion that
-        // introduced it onward, until something rebuilt its terrain. The eight exceptions are
-        // rebuilds - Cataclysm reshaped the old world and four dungeons, Mists did two more.
-        // Every other instance took minor adjustments at most, which is why a Cataclysm capture
-        // of UBRS or Zul'Farrak, or a Shadowlands one of Outland, is still good evidence.
+        // introduced it onward, until something rebuilt its terrain. The thirteen exceptions are
+        // rebuilds - Cataclysm reshaped the old world and five dungeons, Mists three more,
+        // Warlords another three. Every other instance took minor adjustments at most, which is
+        // why a Cataclysm capture of Zul'Farrak, or a Shadowlands one of Outland, is still good
+        // evidence. IngestMapGate.RebuiltAfter holds the same list and must move with this one.
         private const string MapValiditySeed = @"
 INSERT INTO `map_validity` (target, map, usable_branches, note) VALUES
 ('3.3.5',    0, 'Classic,TBC,WotLK', 'Cataclysm reshaped Eastern Kingdoms'),
@@ -318,16 +319,16 @@ INSERT INTO `map_validity` (target, map, usable_branches, note) VALUES
 ('3.3.5',   42, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
 ('3.3.5',   43, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
 ('3.3.5',   44, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
-('3.3.5',   47, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
-('3.3.5',   48, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',   47, 'Classic,TBC,WotLK,Cata,MoP', 'Warlords reworked Razorfen Kraul'),
+('3.3.5',   48, 'Classic,TBC,WotLK,Cata,MoP', 'Warlords reworked Blackfathom Deeps'),
 ('3.3.5',   70, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
 ('3.3.5',   90, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
-('3.3.5',  109, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  109, 'Classic,TBC,WotLK', 'Cataclysm reworked the Sunken Temple'),
 ('3.3.5',  129, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
 ('3.3.5',  169, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
 ('3.3.5',  189, 'Classic,TBC,WotLK,Cata', 'Mists rebuilt Scarlet Monastery'),
 ('3.3.5',  209, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
-('3.3.5',  229, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  229, 'Classic,TBC,WotLK,Cata,MoP', 'Warlords rebuilt Blackrock Spire'),
 ('3.3.5',  230, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
 ('3.3.5',  249, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
 ('3.3.5',  269, 'TBC,WotLK,Cata,MoP,Retail', NULL),
@@ -336,7 +337,7 @@ INSERT INTO `map_validity` (target, map, usable_branches, note) VALUES
 ('3.3.5',  329, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
 ('3.3.5',  349, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
 ('3.3.5',  369, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
-('3.3.5',  389, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
+('3.3.5',  389, 'Classic,TBC,WotLK,Cata', 'Mists revamped Ragefire Chasm'),
 ('3.3.5',  409, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
 ('3.3.5',  429, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),
 ('3.3.5',  449, 'Classic,TBC,WotLK,Cata,MoP,Retail', NULL),

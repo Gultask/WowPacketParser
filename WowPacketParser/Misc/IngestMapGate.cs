@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using WowPacketParser.Enums;
@@ -80,9 +80,10 @@ namespace WowPacketParser.Misc
 
         /// <summary>
         /// Maps a later expansion rebuilt, and the last branch whose capture of one still
-        /// describes 3.3.5 ground. Cataclysm reshaped the old world and rebuilt four dungeons;
-        /// Mists rebuilt two more. Every other instance took minor adjustments at most, which is
-        /// why a Cataclysm capture of UBRS or a Shadowlands capture of Outland is worth having.
+        /// describes 3.3.5 ground. Cataclysm reshaped the old world and rebuilt five dungeons;
+        /// Mists rebuilt three more, Warlords another three. Every other instance took minor
+        /// adjustments at most, which is why a Cataclysm capture of Zul'Farrak or a Shadowlands
+        /// capture of Outland is worth having.
         ///
         /// Being in Map.dbc is not enough on its own. Kalimdor is map 1 in 3.3.5 and map 1 in
         /// Cataclysm, and they are not the same Kalimdor: one 4.4.0 levelling capture put
@@ -91,7 +92,13 @@ namespace WowPacketParser.Misc
         ///
         /// This is the same rule as the map_validity table, applied at parse time instead of at
         /// query time - one is about cost, the other about what may be used, and both want the
-        /// same answer here.
+        /// same answer here. Change one and change the other; letting them drift is what put
+        /// rebuilt Kalimdor into the database in the first place.
+        ///
+        /// MoP is the latest cut-point expressible, because ClientBranch stops there and files
+        /// the whole of Warlords onwards under Retail. That is enough for everything known to
+        /// need gating, and a rebuild first appearing in Legion or later could not be told from
+        /// a Warlords one anyway.
         /// </summary>
         private static readonly Dictionary<uint, int> RebuiltAfter = new Dictionary<uint, int>
         {
@@ -99,10 +106,17 @@ namespace WowPacketParser.Misc
             { 1,   RankWotLK }, // Cataclysm reshaped Kalimdor
             { 33,  RankWotLK }, // Cataclysm rebuilt Shadowfang Keep
             { 36,  RankWotLK }, // Cataclysm rebuilt Deadmines
+            { 109, RankWotLK }, // Cataclysm reworked the Sunken Temple
             { 309, RankWotLK }, // Cataclysm rebuilt Zul'Gurub
             { 568, RankWotLK }, // Cataclysm rebuilt Zul'Aman
             { 189, RankCata },  // Mists rebuilt Scarlet Monastery
             { 289, RankCata },  // Mists rebuilt Scholomance
+            { 389, RankCata },  // Mists revamped Ragefire Chasm
+            // Warlords. Map 229 is Lower and Upper Blackrock Spire together, and Warlords
+            // rebuilt only the upper half, but one map id cannot be half kept.
+            { 47,  RankMoP },   // Warlords reworked Razorfen Kraul
+            { 48,  RankMoP },   // Warlords reworked Blackfathom Deeps
+            { 229, RankMoP },   // Warlords rebuilt Blackrock Spire
         };
 
         private const int RankClassic = 0;
