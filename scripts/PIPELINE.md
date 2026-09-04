@@ -55,8 +55,22 @@ ground a 3.3.5 server still has, and throws away only the rest.
 
 #### The map gate is what makes Cataclysm and later affordable
 
-`-MapPolicy wotlk` keeps only maps present in 3.3.5a `Map.dbc`, read out of a client install
-because AzerothCore ships `map_dbc` empty. Everything else never reaches a handler.
+`-MapPolicy wotlk` keeps a map only if **both** are true: it is present in 3.3.5a `Map.dbc`
+(read out of a client install, because AzerothCore ships `map_dbc` empty), and the sniff's own
+branch is early enough that it is looking at the 3.3.5 version of it. Everything else never
+reaches a handler.
+
+The second half is not optional, and leaving it out was a real bug. Kalimdor is map 1 in 3.3.5
+and map 1 in Cataclysm, and they are not the same Kalimdor. A gate that only asked whether the
+map id existed let a 4.4.0 levelling capture through: **320,000 packets, 3,741 spawns and 51,264
+waypoints of rebuilt Kalimdor**, plus its rewritten gossip text. The rule is the same one
+`map_validity` states - one is about cost and the other about what may be used, and both want
+the same answer - so the gate now applies it directly: maps 0, 1, 33, 36, 309 and 568 are
+Cataclysm-and-later rebuilds, 189 and 289 are Mists rebuilds.
+
+With that in, the 4.4.1 capture measured above goes from 93.2% dropped to **100.0%** - it only
+ever stood on Firelands and rebuilt old world, so it has nothing to give a 3.3.5 server. A 3.4.3
+WotLK capture is still untouched, keeping all eight of its maps including 0 and 1.
 
 The numbers that forced it, measured on the 3,101 sniff corpus:
 
@@ -71,7 +85,7 @@ inside the file or not at all. Measured per sniff afterwards:
 
 | capture | dropped | maps |
 |---|---:|---|
-| 4.4.1 Cata Classic | 93.2% (2,648,418 of 2,842,330) | Firelands (720) |
+| 4.4.1 Cata Classic | 100.0% (2,842,004 of 2,842,330) | Firelands (720), rebuilt 0/1/36 |
 | 9.0.2 Castle Nathria | 100.0% (720,704 of 720,807) | 2296, 2222 |
 | 3.4.3 WotLK Classic | 0% | every map it visited exists in 3.3.5 |
 

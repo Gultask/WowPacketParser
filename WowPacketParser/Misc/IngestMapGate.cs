@@ -78,6 +78,58 @@ namespace WowPacketParser.Misc
             Opcode.SMSG_RESET_COMPRESSION_CONTEXT
         };
 
+        /// <summary>
+        /// Maps a later expansion rebuilt, and the last branch whose capture of one still
+        /// describes 3.3.5 ground. Cataclysm reshaped the old world and rebuilt four dungeons;
+        /// Mists rebuilt two more. Every other instance took minor adjustments at most, which is
+        /// why a Cataclysm capture of UBRS or a Shadowlands capture of Outland is worth having.
+        ///
+        /// Being in Map.dbc is not enough on its own. Kalimdor is map 1 in 3.3.5 and map 1 in
+        /// Cataclysm, and they are not the same Kalimdor: one 4.4.0 levelling capture put
+        /// 320,000 packets, 3,741 spawns and 51,264 waypoints of rebuilt Kalimdor through a gate
+        /// that only asked whether the map id existed.
+        ///
+        /// This is the same rule as the map_validity table, applied at parse time instead of at
+        /// query time - one is about cost, the other about what may be used, and both want the
+        /// same answer here.
+        /// </summary>
+        private static readonly Dictionary<uint, int> RebuiltAfter = new Dictionary<uint, int>
+        {
+            { 0,   RankWotLK }, // Cataclysm reshaped Eastern Kingdoms
+            { 1,   RankWotLK }, // Cataclysm reshaped Kalimdor
+            { 33,  RankWotLK }, // Cataclysm rebuilt Shadowfang Keep
+            { 36,  RankWotLK }, // Cataclysm rebuilt Deadmines
+            { 309, RankWotLK }, // Cataclysm rebuilt Zul'Gurub
+            { 568, RankWotLK }, // Cataclysm rebuilt Zul'Aman
+            { 189, RankCata },  // Mists rebuilt Scarlet Monastery
+            { 289, RankCata },  // Mists rebuilt Scholomance
+        };
+
+        private const int RankClassic = 0;
+        private const int RankTBC = 1;
+        private const int RankWotLK = 2;
+        private const int RankCata = 3;
+        private const int RankMoP = 4;
+        private const int RankLater = 99;
+
+        /// <summary>
+        /// How late this sniff's content is. ClientBranch cannot be compared directly - it
+        /// numbers Retail 0, ahead of Classic - and ClientType gives WotLK Classic and
+        /// Shadowlands the same value, so neither orders content on its own.
+        /// </summary>
+        private static int BranchRank()
+        {
+            switch (ClientVersion.Branch)
+            {
+                case ClientBranch.Classic: return RankClassic;
+                case ClientBranch.TBC:     return RankTBC;
+                case ClientBranch.WotLK:   return RankWotLK;
+                case ClientBranch.Cata:    return RankCata;
+                case ClientBranch.MoP:     return RankMoP;
+                default:                   return RankLater;
+            }
+        }
+
         private static HashSet<uint> _allow;
         private static HashSet<uint> _deny = new HashSet<uint>();
 
@@ -136,7 +188,15 @@ namespace WowPacketParser.Misc
         {
             if (_deny.Contains(map))
                 return false;
-            return _allow == null || _allow.Contains(map);
+
+            if (_allow == null)
+                return true;
+
+            if (!_allow.Contains(map))
+                return false;
+
+            // Present in 3.3.5, but this branch may be looking at a rebuilt version of it.
+            return !RebuiltAfter.TryGetValue(map, out var lastGoodRank) || BranchRank() <= lastGoodRank;
         }
 
         /// <summary>
