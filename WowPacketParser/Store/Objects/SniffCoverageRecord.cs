@@ -68,6 +68,8 @@
         public const string CreatureGossip = "creature_gossip";
         public const string CreatureValue = "creature_value";
         public const string CreatureAggro = "creature_aggro";
+        public const string CreatureTemplate = "creature_template";
+        public const string CreatureTemplateModel = "creature_template_model";
 
         public const int CreatureSpawnVersion = 3;   // 2 added emote/stand/sheathe state, 3 added health
         public const int GameObjectSpawnVersion = 2;   // 2 added the static rotation quaternion
@@ -88,6 +90,8 @@
         public const int CreatureGossipVersion = 1;
         public const int CreatureValueVersion = 1;
         public const int CreatureAggroVersion = 1;
+        public const int CreatureTemplateVersion = 1;
+        public const int CreatureTemplateModelVersion = 1;
 
         public const string StatusOk = "ok";
         public const string StatusEmpty = "empty";

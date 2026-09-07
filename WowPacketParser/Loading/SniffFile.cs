@@ -816,6 +816,20 @@ namespace WowPacketParser.Loading
                 coverage.Add(Coverage(CollectorVersion.CreatureValue, CollectorVersion.CreatureValueVersion,
                                       valueWritten, Opcode.SMSG_UPDATE_OBJECT));
 
+                var templates = CollectCreatureTemplates(sniffId);
+                var templateWritten = IngestDatabase.SaveCreatureTemplates(sniffId, templates);
+                if (templates.Count > 0)
+                    Trace.WriteLine($"{_logPrefix}: {templateWritten} creature templates recorded");
+                coverage.Add(Coverage(CollectorVersion.CreatureTemplate, CollectorVersion.CreatureTemplateVersion,
+                                      templateWritten, Opcode.SMSG_QUERY_CREATURE_RESPONSE));
+
+                var models = CollectCreatureTemplateModels(sniffId);
+                var modelWritten = IngestDatabase.SaveCreatureTemplateModels(sniffId, models);
+                if (models.Count > 0)
+                    Trace.WriteLine($"{_logPrefix}: {modelWritten} creature display ids recorded");
+                coverage.Add(Coverage(CollectorVersion.CreatureTemplateModel, CollectorVersion.CreatureTemplateModelVersion,
+                                      modelWritten, Opcode.SMSG_QUERY_CREATURE_RESPONSE));
+
                 var aggro = CollectCreatureAggro(sniffId, packets);
                 var aggroWritten = IngestDatabase.SaveCreatureAggro(sniffId, aggro);
                 if (aggro.Count > 0)
@@ -1396,6 +1410,20 @@ namespace WowPacketParser.Loading
                 if (unit.RangedAttackRoundBaseTime != null)
                     Record("ranged_attack_time", unit.RangedAttackRoundBaseTime.Value);
 
+                // These left creature_spawn when it stopped carrying entry attributes.
+                if (unit.Flags != null)
+                    Record("unit_flags", unit.Flags.Value);
+                if (unit.Flags2 != null)
+                    Record("unit_flags2", unit.Flags2.Value);
+                if (unit.Flags3 != null)
+                    Record("unit_flags3", unit.Flags3.Value);
+                if (unit.EmoteState != null)
+                    Record("emote_state", unit.EmoteState.Value);
+                if (unit.StandState != null)
+                    Record("stand_state", unit.StandState.Value);
+                if (unit.SheatheState != null)
+                    Record("sheathe_state", unit.SheatheState.Value);
+
                 for (var i = 0; i < unit.NpcFlags.Count; i++)
                 {
                     if (unit.NpcFlags[i]?.Value != null)
@@ -1454,16 +1482,16 @@ namespace WowPacketParser.Loading
         /// Already divided by the 2.5 and 7.0 baselines by the handlers, so these are the
         /// multipliers AzerothCore's speed_walk and speed_run want. Do not divide again.
         /// </summary>
-        private void FoldMovement(string key, string field, decimal value)
+        private void FoldValue(string key, string field, decimal? value, bool onCreate)
         {
-            if (key == null || value <= 0)
+            if (key == null || value == null)
                 return;
 
-            var id = (key, field, value);
+            var id = (key, field, value.Value);
             if (_creatureValues.TryGetValue(id, out var existing))
             {
                 existing.Observations++;
-                existing.OnCreate = true;
+                existing.OnCreate |= onCreate;
                 return;
             }
 
@@ -1471,8 +1499,8 @@ namespace WowPacketParser.Loading
             {
                 Guid = key,
                 Field = field,
-                Value = value,
-                OnCreate = true,
+                Value = value.Value,
+                OnCreate = onCreate,
                 Observations = 1
             };
         }
@@ -1551,9 +1579,13 @@ namespace WowPacketParser.Loading
 
                 if (obj.Movement != null)
                 {
-                    FoldMovement(key, "speed_walk", (decimal)obj.Movement.WalkSpeed);
-                    FoldMovement(key, "speed_run", (decimal)obj.Movement.RunSpeed);
+                    if (obj.Movement.WalkSpeed > 0)
+                        FoldValue(key, "speed_walk", (decimal)obj.Movement.WalkSpeed, true);
+                    if (obj.Movement.RunSpeed > 0)
+                        FoldValue(key, "speed_run", (decimal)obj.Movement.RunSpeed, true);
                 }
+
+                SweepUnitData(key, obj as Unit);
             }
 
             var values = new List<CreatureValueRecord>();
@@ -1569,6 +1601,150 @@ namespace WowPacketParser.Loading
             }
 
             return values;
+        }
+
+        /// <summary>
+        /// The merged state each guid ended the sniff with, so every unit has a row for every
+        /// field it ever carried even when no update block this collector saw mentioned it.
+        ///
+        /// Marked on_create = false: this is where the creature finished, not where it started.
+        /// If the fold already recorded the same value from a create block, that row keeps its
+        /// flag and only its count goes up.
+        /// </summary>
+        private void SweepUnitData(string key, Unit unit)
+        {
+            var d = unit?.UnitData;
+            if (d == null)
+                return;
+
+            FoldValue(key, "faction_template", d.FactionTemplate, false);
+            FoldValue(key, "level", d.Level, false);
+            FoldValue(key, "display_id", d.DisplayID, false);
+            FoldValue(key, "native_display_id", d.NativeDisplayID, false);
+            FoldValue(key, "mount_display_id", d.MountDisplayID, false);
+            FoldValue(key, "unit_flags", d.Flags, false);
+            FoldValue(key, "unit_flags2", d.Flags2, false);
+            FoldValue(key, "unit_flags3", d.Flags3, false);
+            FoldValue(key, "emote_state", d.EmoteState, false);
+            FoldValue(key, "stand_state", d.StandState, false);
+            FoldValue(key, "sheathe_state", d.SheatheState, false);
+            FoldValue(key, "combat_reach", (decimal?)d.CombatReach, false);
+            FoldValue(key, "bounding_radius", (decimal?)d.BoundingRadius, false);
+            FoldValue(key, "ranged_attack_time", d.RangedAttackRoundBaseTime, false);
+
+            if (d.NpcFlags != null)
+            {
+                for (var i = 0; i < d.NpcFlags.Length; i++)
+                    FoldValue(key, "npc_flags_" + i, d.NpcFlags[i], false);
+            }
+
+            if (d.AttackRoundBaseTime != null)
+            {
+                for (var i = 0; i < d.AttackRoundBaseTime.Length; i++)
+                    FoldValue(key, "attack_time_" + i, d.AttackRoundBaseTime[i], false);
+            }
+
+            // Still only present for a unit the player owns, controls or has special info on.
+            if (d.Resistances != null)
+            {
+                for (var i = 0; i < d.Resistances.Length; i++)
+                    FoldValue(key, "resistance_" + i, d.Resistances[i], false);
+            }
+        }
+
+        /// <summary>
+        /// The static fields the server states outright, from SMSG_QUERY_CREATURE_RESPONSE.
+        /// </summary>
+        private List<CreatureTemplateRecord> CollectCreatureTemplates(ulong sniffId)
+        {
+            var templates = new List<CreatureTemplateRecord>();
+
+            foreach (var pair in Storage.CreatureTemplates)
+            {
+                var t = pair.Value.Item1;
+                if (t?.Entry == null || t.Entry == 0)
+                    continue;
+
+                templates.Add(new CreatureTemplateRecord
+                {
+                    SniffId = sniffId,
+                    Entry = (uint)t.Entry,
+                    Name = t.Name,
+                    FemaleName = t.FemaleName,
+                    SubName = t.SubName,
+                    TitleAlt = t.TitleAlt,
+                    IconName = t.IconName,
+                    Rank = t.Rank == null ? null : (uint?)t.Rank,
+                    Family = t.Family == null ? null : (uint?)t.Family,
+                    Type = t.Type == null ? null : (uint?)t.Type,
+                    TypeFlags = t.TypeFlags == null ? null : (uint?)t.TypeFlags,
+                    TypeFlags2 = t.TypeFlags2,
+                    PetSpellDataId = t.PetSpellDataID,
+                    HealthModifier = t.HealthModifier,
+                    ManaModifier = t.ManaModifier,
+                    RacialLeader = t.RacialLeader ?? false,
+                    Civilian = t.Civilian ?? false,
+                    MovementId = t.MovementID,
+                    KillCredit1 = t.KillCredits != null && t.KillCredits.Length > 0 ? t.KillCredits[0] : null,
+                    KillCredit2 = t.KillCredits != null && t.KillCredits.Length > 1 ? t.KillCredits[1] : null,
+                    RequiredExpansion = t.RequiredExpansion == null ? null : (uint?)t.RequiredExpansion,
+                    VignetteID = t.VignetteID,
+                    UnitClass = t.UnitClass,
+                    VerifiedBuild = t.VerifiedBuild
+                });
+            }
+
+            return templates;
+        }
+
+        /// <summary>
+        /// Display ids, from whichever shape this branch sends. Up to Warlords the query carries
+        /// four fixed slots on the template itself; after it, a variable list with scale and
+        /// probability in its own store. Both are read, for the same reason the action bar
+        /// collector reads three stores.
+        /// </summary>
+        private List<CreatureTemplateModelRecord> CollectCreatureTemplateModels(ulong sniffId)
+        {
+            var models = new List<CreatureTemplateModelRecord>();
+            var seen = new HashSet<(uint, uint)>();
+
+            void Add(uint entry, uint idx, uint displayId, float? scale, float? probability)
+            {
+                if (entry == 0 || displayId == 0 || !seen.Add((entry, idx)))
+                    return;
+
+                models.Add(new CreatureTemplateModelRecord
+                {
+                    SniffId = sniffId,
+                    Entry = entry,
+                    Index = idx,
+                    DisplayId = displayId,
+                    DisplayScale = scale,
+                    Probability = probability
+                });
+            }
+
+            foreach (var pair in Storage.CreatureTemplateModels)
+            {
+                var m = pair.Item1;
+                if (m.CreatureID != null && m.CreatureDisplayID != null)
+                    Add((uint)m.CreatureID, m.Idx ?? 0, (uint)m.CreatureDisplayID, m.DisplayScale, m.Probability);
+            }
+
+            foreach (var pair in Storage.CreatureTemplates)
+            {
+                var t = pair.Value.Item1;
+                if (t?.Entry == null || t.ModelIDs == null)
+                    continue;
+
+                for (var i = 0; i < t.ModelIDs.Length; i++)
+                {
+                    if (t.ModelIDs[i] != null && t.ModelIDs[i] > 0)
+                        Add((uint)t.Entry, (uint)i, (uint)t.ModelIDs[i], null, null);
+                }
+            }
+
+            return models;
         }
 
         private List<NpcVendorRecord> CollectNpcVendors(ulong sniffId)
@@ -2083,13 +2259,9 @@ namespace WowPacketParser.Loading
                     CreateType = (int)obj.CreateType,
                     PhaseMask = obj.PhaseMask != 0 ? obj.PhaseMask : null,
                     Phases = obj.Phases != null && obj.Phases.Count > 0 ? string.Join(" - ", obj.Phases) : null,
-                    Level = unit.UnitData.Level,
-                    FactionTemplate = unit.UnitData.FactionTemplate,
-                    UnitFlags = unit.UnitData.Flags,
+
                     Health = unit.UnitData.Health,
-                    EmoteState = unit.UnitData.EmoteState,
-                    StandState = unit.UnitData.StandState,
-                    SheatheState = unit.UnitData.SheatheState,
+
                     FirstSeenUtc = _firstPacketTimeUtc.HasValue && pair.Value.Item2.HasValue
                         ? _firstPacketTimeUtc.Value + pair.Value.Item2.Value
                         : _firstPacketTimeUtc

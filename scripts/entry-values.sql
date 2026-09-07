@@ -162,3 +162,87 @@ SELECT field, verdict, COUNT(*) AS entries
 FROM   entry_value_best
 GROUP  BY field, verdict
 ORDER  BY field, verdict;
+
+-- ------------------------------------------------------- walk or run per segment
+-- A move order carries one duration for the whole spline, not a delay per point: the client
+-- interpolates at constant speed between them. So a per-point delay would be a computation
+-- rather than an observation, and the honest unit is the segment.
+--
+-- Segment speed = path length / move_time_ms. Compare that against the entry's own speeds -
+-- which entry_value_best already holds as AzerothCore multipliers - to say whether the creature
+-- walked or ran. That is the number worth having next to movement_id: if MovementInfoID means
+-- anything, entries sharing one should agree on how they travel.
+--
+-- Only segments with at least two points and a real duration can say anything.
+DROP TABLE IF EXISTS waypoint_segment_speed;
+CREATE TABLE waypoint_segment_speed (
+  sniff_id    BIGINT UNSIGNED NOT NULL,
+  guid        VARCHAR(40)     NOT NULL,
+  entry       INT UNSIGNED    NOT NULL,
+  segment_id  INT UNSIGNED    NOT NULL,
+  points      INT UNSIGNED    NOT NULL,
+  length_yd   DECIMAL(12,3)   NOT NULL,
+  move_time_ms INT UNSIGNED   NOT NULL,
+  yards_sec   DECIMAL(10,4)   NOT NULL,
+  PRIMARY KEY (sniff_id, guid, segment_id),
+  KEY ix_wss_entry (entry)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Observed travel speed per move order. One duration covers the whole spline, so the segment is the smallest honest unit.';
+
+INSERT INTO waypoint_segment_speed (sniff_id, guid, entry, segment_id, points, length_yd, move_time_ms, yards_sec)
+SELECT s.sniff_id, s.guid, s.entry, s.segment_id,
+       COUNT(*) + 1                                   AS points,
+       SUM(s.step)                                    AS length_yd,
+       MAX(s.move_time_ms)                            AS move_time_ms,
+       SUM(s.step) / (MAX(s.move_time_ms) / 1000.0)   AS yards_sec
+FROM (
+  SELECT w.sniff_id, w.guid, w.entry, w.segment_id, w.move_time_ms,
+         SQRT(POW(w.position_x - LAG(w.position_x) OVER p, 2)
+            + POW(w.position_y - LAG(w.position_y) OVER p, 2)
+            + POW(w.position_z - LAG(w.position_z) OVER p, 2)) AS step
+  FROM   creature_waypoint w
+  WHERE  w.move_time_ms > 0
+  WINDOW p AS (PARTITION BY w.sniff_id, w.guid, w.segment_id ORDER BY w.point_index)
+) s
+WHERE s.step IS NOT NULL
+GROUP BY s.sniff_id, s.guid, s.entry, s.segment_id
+HAVING SUM(s.step) > 0 AND MAX(s.move_time_ms) > 0;
+
+-- Did the entry walk or run? Judged against its own recorded speeds, with a 15% tolerance for
+-- spline overhead and the fact that move_time includes acceleration the points do not show.
+DROP TABLE IF EXISTS entry_travel_mode;
+CREATE TABLE entry_travel_mode (
+  entry        INT UNSIGNED  NOT NULL,
+  movement_id  INT UNSIGNED  NULL COMMENT 'CreatureMovementInfoID, straight from the query response',
+  segments     INT UNSIGNED  NOT NULL,
+  median_yd_s  DECIMAL(10,4) NOT NULL,
+  walk_yd_s    DECIMAL(10,4) NULL COMMENT 'entry speed_walk multiplier x 2.5',
+  run_yd_s     DECIMAL(10,4) NULL COMMENT 'entry speed_run multiplier x 7.0',
+  mode         VARCHAR(10)   NOT NULL COMMENT 'walk, run, other or unknown',
+  PRIMARY KEY (entry),
+  KEY ix_etm_movement (movement_id, mode)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='How each entry was observed travelling, next to its movement_id. Entries sharing a movement_id should agree if the id means anything.';
+
+INSERT INTO entry_travel_mode (entry, movement_id, segments, median_yd_s, walk_yd_s, run_yd_s, mode)
+SELECT m.entry, ct.movement_id, m.segments, m.median_yd_s,
+       w.value * 2.5 AS walk_yd_s,
+       r.value * 7.0 AS run_yd_s,
+       CASE WHEN w.value IS NULL AND r.value IS NULL              THEN 'unknown'
+            WHEN ABS(m.median_yd_s - w.value * 2.5) <= 0.15 * w.value * 2.5 THEN 'walk'
+            WHEN ABS(m.median_yd_s - r.value * 7.0) <= 0.15 * r.value * 7.0 THEN 'run'
+            ELSE 'other' END AS mode
+FROM (
+  SELECT entry, COUNT(*) AS segments,
+         CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(GROUP_CONCAT(yards_sec ORDER BY yards_sec), ',',
+              CEIL(COUNT(*) / 2)), ',', -1) AS DECIMAL(10,4)) AS median_yd_s
+  FROM   waypoint_segment_speed
+  GROUP  BY entry
+) m
+LEFT JOIN entry_value_best w  ON w.entry = m.entry AND w.field = 'speed_walk'
+LEFT JOIN entry_value_best r  ON r.entry = m.entry AND r.field = 'speed_run'
+LEFT JOIN (SELECT entry, MAX(movement_id) AS movement_id FROM creature_template GROUP BY entry) ct
+       ON ct.entry = m.entry;
+
+SELECT mode, COUNT(*) AS entries, ROUND(AVG(segments),1) AS avg_segments
+FROM   entry_travel_mode GROUP BY mode ORDER BY entries DESC;

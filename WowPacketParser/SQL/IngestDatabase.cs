@@ -88,7 +88,8 @@ namespace WowPacketParser.SQL
                                         NpcVendorTableDdl, NpcSpellClickTableDdl,
                                         CreatureTemplateSpellTableDdl, CreatureQuestItemTableDdl,
                                         CreatureGossipTableDdl, CreatureValueTableDdl,
-                                        CreatureAggroTableDdl })
+                                        CreatureAggroTableDdl, CreatureTemplateTableDdl,
+                                        CreatureTemplateModelTableDdl })
             {
                 using (var cmd = _conn.CreateCommand())
                 {
@@ -186,6 +187,54 @@ CREATE TABLE IF NOT EXISTS `creature_value` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   COMMENT='One row per distinct value a guid was seen carrying. Long format because none of these are constants: faction changes when a quest giver turns hostile, and two guids of one entry can differ for a whole sniff. Resistances are PRIVATE|OWNER|SPECIAL_INFO, so their absence is not zero.';";
 
+        private const string CreatureTemplateTableDdl = @"
+CREATE TABLE IF NOT EXISTS `creature_template` (
+  `sniff_id`           BIGINT UNSIGNED NOT NULL,
+  `entry`              INT UNSIGNED    NOT NULL,
+  `name`               VARCHAR(200)    NULL,
+  `female_name`        VARCHAR(200)    NULL,
+  `sub_name`           VARCHAR(200)    NULL,
+  `title_alt`          VARCHAR(200)    NULL,
+  `icon_name`          VARCHAR(100)    NULL,
+  `rank`               INT UNSIGNED    NULL,
+  `family`             INT UNSIGNED    NULL,
+  `type`               INT UNSIGNED    NULL,
+  `type_flags`         INT UNSIGNED    NULL,
+  `type_flags2`        INT UNSIGNED    NULL,
+  `pet_spell_data_id`  INT UNSIGNED    NULL,
+  `health_modifier`    FLOAT           NULL,
+  `mana_modifier`      FLOAT           NULL,
+  `racial_leader`      TINYINT(1)      NOT NULL,
+  `civilian`           TINYINT(1)      NOT NULL,
+  `movement_id`        INT UNSIGNED    NULL,
+  `kill_credit1`       INT UNSIGNED    NULL,
+  `kill_credit2`       INT UNSIGNED    NULL,
+  `required_expansion` INT UNSIGNED    NULL,
+  `vignette_id`        INT UNSIGNED    NULL,
+  `unit_class`         INT UNSIGNED    NULL,
+  `verified_build`     INT             NULL,
+  PRIMARY KEY (`sniff_id`, `entry`),
+  KEY `ix_ctemplate_entry` (`entry`),
+  KEY `ix_ctemplate_name` (`name`(64)),
+  CONSTRAINT `fk_ctemplate_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='The static half of a creature, stated by SMSG_QUERY_CREATURE_RESPONSE rather than inferred. The fields the query does not carry - faction, speeds, flags - are derived in entry_value instead.';";
+
+        private const string CreatureTemplateModelTableDdl = @"
+CREATE TABLE IF NOT EXISTS `creature_template_model` (
+  `sniff_id`      BIGINT UNSIGNED NOT NULL,
+  `entry`         INT UNSIGNED    NOT NULL,
+  `idx`           INT UNSIGNED    NOT NULL,
+  `display_id`    INT UNSIGNED    NOT NULL,
+  `display_scale` FLOAT           NULL,
+  `probability`   FLOAT           NULL,
+  PRIMARY KEY (`sniff_id`, `entry`, `idx`),
+  KEY `ix_ctmodel_entry` (`entry`),
+  KEY `ix_ctmodel_display` (`display_id`),
+  CONSTRAINT `fk_ctmodel_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Display ids per entry. Its own table because the count varies: four fixed slots up to Warlords, a variable list with scale and probability after.';";
+
         private const string CreatureAggroTableDdl = @"
 CREATE TABLE IF NOT EXISTS `creature_aggro` (
   `sniff_id`  BIGINT UNSIGNED NOT NULL,
@@ -278,13 +327,7 @@ CREATE TABLE IF NOT EXISTS `creature_spawn` (
   `create_type`    TINYINT         NOT NULL COMMENT '1 = entered visibility range, 2 = spawned in view',
   `phase_mask`     INT UNSIGNED    NULL,
   `phases`         TEXT            NULL,
-  `level`          INT             NULL,
-  `faction`        INT             NULL,
-  `unit_flags`     INT UNSIGNED    NULL,
-  `health`         BIGINT          NULL,
-  `emote_state`    INT             NULL,
-  `stand_state`    TINYINT UNSIGNED NULL,
-  `sheathe_state`  TINYINT UNSIGNED NULL,
+  `health`         BIGINT          NULL COMMENT 'instantaneous, and what tells a corpse from a spawn - not an entry attribute',
   `first_seen_utc` DATETIME(3)     NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_creature_sniff_guid` (`sniff_id`, `guid`),
@@ -756,8 +799,7 @@ ON DUPLICATE KEY UPDATE
 
         private const string CreatureSpawnColumns =
             "guid, entry, map, area_id, zone_id, position_x, position_y, position_z, orientation, " +
-            "create_type, phase_mask, phases, level, faction, unit_flags, health, " +
-            "emote_state, stand_state, sheathe_state, first_seen_utc";
+            "create_type, phase_mask, phases, health, first_seen_utc";
 
         public static int SaveCreatureSpawns(ulong sniffId, IReadOnlyList<CreatureSpawnRecord> spawns)
         {
@@ -768,8 +810,7 @@ ON DUPLICATE KEY UPDATE
                 {
                     c.Guid, c.Entry, c.Map, c.AreaId, c.ZoneId,
                     c.PositionX, c.PositionY, c.PositionZ, c.Orientation,
-                    c.CreateType, c.PhaseMask, c.Phases, c.Level, c.FactionTemplate, c.UnitFlags, c.Health,
-                    c.EmoteState, c.StandState, c.SheatheState, c.FirstSeenUtc
+                    c.CreateType, c.PhaseMask, c.Phases, c.Health, c.FirstSeenUtc
                 });
             }
 
@@ -1135,6 +1176,42 @@ CREATE TABLE IF NOT EXISTS `areatrigger_teleport` (
             }
 
             return SaveRows("creature_value", sniffId, CreatureValueColumns, rows, 1000);
+        }
+
+        private const string CreatureTemplateColumns =
+            "entry, name, female_name, sub_name, title_alt, icon_name, `rank`, family, type, " +
+            "type_flags, type_flags2, pet_spell_data_id, health_modifier, mana_modifier, " +
+            "racial_leader, civilian, movement_id, kill_credit1, kill_credit2, " +
+            "required_expansion, vignette_id, unit_class, verified_build";
+
+        public static int SaveCreatureTemplates(ulong sniffId, IReadOnlyList<CreatureTemplateRecord> templates)
+        {
+            var rows = new List<object[]>(templates.Count);
+            foreach (var t in templates)
+            {
+                rows.Add(new object[]
+                {
+                    t.Entry, t.Name, t.FemaleName, t.SubName, t.TitleAlt, t.IconName, t.Rank,
+                    t.Family, t.Type, t.TypeFlags, t.TypeFlags2, t.PetSpellDataId,
+                    t.HealthModifier, t.ManaModifier, t.RacialLeader ? 1 : 0, t.Civilian ? 1 : 0,
+                    t.MovementId, t.KillCredit1, t.KillCredit2, t.RequiredExpansion,
+                    t.VignetteID, t.UnitClass, t.VerifiedBuild
+                });
+            }
+
+            return SaveRows("creature_template", sniffId, CreatureTemplateColumns, rows);
+        }
+
+        private const string CreatureTemplateModelColumns =
+            "entry, idx, display_id, display_scale, probability";
+
+        public static int SaveCreatureTemplateModels(ulong sniffId, IReadOnlyList<CreatureTemplateModelRecord> models)
+        {
+            var rows = new List<object[]>(models.Count);
+            foreach (var m in models)
+                rows.Add(new object[] { m.Entry, m.Index, m.DisplayId, m.DisplayScale, m.Probability });
+
+            return SaveRows("creature_template_model", sniffId, CreatureTemplateModelColumns, rows);
         }
 
         private const string CreatureAggroColumns = "guid, entry, map, aggro_utc";

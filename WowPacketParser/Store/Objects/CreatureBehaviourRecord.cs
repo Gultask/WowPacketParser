@@ -277,6 +277,60 @@ namespace WowPacketParser.Store.Objects
     /// the delay AzerothCore stores as CastStartTimeMin/Max, which is a different number from
     /// the gap between two later casts of the same spell.
     /// </summary>
+    /// <summary>
+    /// The static half of a creature, from SMSG_QUERY_CREATURE_RESPONSE.
+    ///
+    /// Everything here is a property of the entry that no amount of watching update blocks will
+    /// reveal - name, type, family, rank, the modifiers. It is also the only one of the ingest
+    /// tables whose values do not need a vote: the server states them.
+    ///
+    /// The parser also builds a CreatureTemplateNonWDB from update fields - faction, speeds,
+    /// flags, attack times. That is deliberately not ingested: entry_value already derives the
+    /// same fields across the whole corpus with a guid count and a verdict behind each one,
+    /// which is better evidence than one sniff's single guess.
+    /// </summary>
+    public sealed class CreatureTemplateRecord
+    {
+        public ulong SniffId;
+        public uint Entry;
+        public string Name;
+        public string FemaleName;
+        public string SubName;
+        public string TitleAlt;
+        public string IconName;
+        public uint? Rank;
+        public uint? Family;
+        public uint? Type;
+        public uint? TypeFlags;
+        public uint? TypeFlags2;
+        public uint? PetSpellDataId;
+        public float? HealthModifier;
+        public float? ManaModifier;
+        public bool RacialLeader;
+        public bool Civilian;
+        public uint? MovementId;
+        public uint? KillCredit1;
+        public uint? KillCredit2;
+        public uint? RequiredExpansion;
+        public uint? VignetteID;
+        public uint? UnitClass;
+        public int? VerifiedBuild;
+    }
+
+    /// <summary>
+    /// A display id the query response listed for an entry, kept apart because the count varies:
+    /// four fixed slots up to Warlords, a variable list with scale and probability after.
+    /// </summary>
+    public sealed class CreatureTemplateModelRecord
+    {
+        public ulong SniffId;
+        public uint Entry;
+        public uint Index;
+        public uint DisplayId;
+        public float? DisplayScale;
+        public float? Probability;
+    }
+
     public sealed class CreatureAggroRecord
     {
         public ulong SniffId;
