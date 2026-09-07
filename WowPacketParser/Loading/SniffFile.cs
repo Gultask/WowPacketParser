@@ -1335,7 +1335,13 @@ namespace WowPacketParser.Loading
         ///
         /// Runs on the write stage, which is single threaded, so a plain dictionary is safe.
         /// </summary>
-        private readonly Dictionary<(string Guid, string Field, decimal Value), CreatureValueRecord> _creatureValues = new();
+        private sealed class FoldedValue
+        {
+            public bool OnCreate;
+            public int Observations;
+        }
+
+        private readonly Dictionary<(string Guid, string Field, decimal Value), FoldedValue> _creatureValues = new();
 
         private static readonly string[] LegacyValueFields =
         {
@@ -1362,25 +1368,7 @@ namespace WowPacketParser.Loading
             if (guid.Type != UniversalHighGuid.Creature && guid.Type != UniversalHighGuid.Vehicle)
                 return;
 
-            void Record(string field, decimal value)
-            {
-                var id = (key, field, value);
-                if (_creatureValues.TryGetValue(id, out var existing))
-                {
-                    existing.Observations++;
-                    existing.OnCreate |= onCreate;
-                    return;
-                }
-
-                _creatureValues[id] = new CreatureValueRecord
-                {
-                    Guid = key,
-                    Field = field,
-                    Value = value,
-                    OnCreate = onCreate,
-                    Observations = 1
-                };
-            }
+            void Record(string field, decimal value) => FoldValue(key, field, value, onCreate);
 
             if (values.Fields?.Unit != null)
             {
@@ -1495,14 +1483,7 @@ namespace WowPacketParser.Loading
                 return;
             }
 
-            _creatureValues[id] = new CreatureValueRecord
-            {
-                Guid = key,
-                Field = field,
-                Value = value.Value,
-                OnCreate = onCreate,
-                Observations = 1
-            };
+            _creatureValues[id] = new FoldedValue { OnCreate = onCreate, Observations = 1 };
         }
 
         /// <summary>
@@ -1588,19 +1569,62 @@ namespace WowPacketParser.Loading
                 SweepUnitData(key, obj as Unit);
             }
 
-            var values = new List<CreatureValueRecord>();
-            foreach (var record in _creatureValues.Values)
+            // How many values each guid held per field, so a creature that changed can be told
+            // from two that always disagreed once the guids themselves are gone.
+            var valuesPerGuid = new Dictionary<(string Guid, string Field), int>();
+            foreach (var id in _creatureValues.Keys)
             {
-                if (!known.TryGetValue(record.Guid, out var unit))
-                    continue;
-
-                record.SniffId = sniffId;
-                record.Entry = unit.Entry;
-                record.Map = unit.Map;
-                values.Add(record);
+                var k = (id.Guid, id.Field);
+                valuesPerGuid.TryGetValue(k, out var n);
+                valuesPerGuid[k] = n + 1;
             }
 
-            return values;
+            var changedGuids = new Dictionary<(uint Entry, uint Map, string Field), HashSet<string>>();
+            var aggregated = new Dictionary<(uint Entry, uint Map, string Field, decimal Value), CreatureValueRecord>();
+
+            foreach (var pair in _creatureValues)
+            {
+                var id = pair.Key;
+                if (!known.TryGetValue(id.Guid, out var unit))
+                    continue;
+
+                var key = (unit.Entry, unit.Map, id.Field, id.Value);
+                if (!aggregated.TryGetValue(key, out var row))
+                {
+                    row = new CreatureValueRecord
+                    {
+                        SniffId = sniffId,
+                        Entry = unit.Entry,
+                        Map = unit.Map,
+                        Field = id.Field,
+                        Value = id.Value
+                    };
+                    aggregated[key] = row;
+                }
+
+                // Each accumulator entry is one distinct guid for this field and value, so
+                // counting entries is counting guids.
+                row.Guids++;
+                row.Observations += pair.Value.Observations;
+                if (pair.Value.OnCreate)
+                    row.OnCreateGuids++;
+
+                if (valuesPerGuid.TryGetValue((id.Guid, id.Field), out var held) && held > 1)
+                {
+                    var ck = (unit.Entry, unit.Map, id.Field);
+                    if (!changedGuids.TryGetValue(ck, out var set))
+                        changedGuids[ck] = set = new HashSet<string>();
+                    set.Add(id.Guid);
+                }
+            }
+
+            foreach (var row in aggregated.Values)
+            {
+                if (changedGuids.TryGetValue((row.Entry, row.Map, row.Field), out var set))
+                    row.ChangedGuids = set.Count;
+            }
+
+            return aggregated.Values.ToList();
         }
 
         /// <summary>

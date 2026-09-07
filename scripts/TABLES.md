@@ -34,7 +34,9 @@ the only tables that cannot be rebuilt without re-reading the sniffs, which take
 | `creature_template_spell` | sniff × creature × slot | the action bar of a controlled creature |
 | `creature_quest_item` | sniff × creature × index | quest drops from the creature query response |
 | `creature_gossip` | sniff × creature × menu | which menu a creature opened with |
-| `creature_value` | sniff × guid × field × value | faction, speeds, resistances, combat reach, bounding radius, attack times, mount, npc flags, level, model |
+| `creature_value` | sniff × entry × map × field × value | faction, speeds, resistances, combat reach, bounding radius, attack times, mount, npc flags, level, model, unit flags, emote and stand state |
+| `creature_template` | sniff × entry | the static half, stated by the query response |
+| `creature_template_model` | sniff × entry × index | display ids, variable in number |
 | `creature_aggro` | hostile AI reaction | one row per pull, not per creature |
 
 ### These belong to the entry, but they are recorded per guid
@@ -61,20 +63,42 @@ agreed), **dominant** (at least 80%), **split** (less). On one 3.4.0 capture, 96
 baselines before storing, so a text dump printing `RunSpeed: 8` becomes `1.142857` here - which
 is what `creature_template.speed_run` wants. Do not divide again.
 
-`creature_spawn` still carries `faction`, `level`, `unit_flags` and friends from the moment the
-creature was created. Nothing downstream reads them and `creature_value` with `on_create = 1`
-now says the same thing better, so they are redundant rather than wrong.
+`creature_spawn` no longer carries `faction`, `level`, `unit_flags`, `emote_state`,
+`stand_state` or `sheathe_state`. Those were never the spawn's values in the first place: the
+collector read them from the merged `UnitData` at the end of parsing, so a creature that changed
+faction mid-sniff reported the changed one. `health` stays, being genuinely instantaneous and
+what tells a corpse from a spawn.
 
-### Why `creature_value` is long format
+### Why `creature_value` is long format, and aggregated
 
-None of these are constants. Measured on one 3.4.0 questing capture: **19 guids changed
-faction during the sniff** and **8 entries had guids that disagreed with each other**. Storing
-one value per guid would have reported a quest giver's hostile faction as its own. `on_create`
+None of these are constants, so one row per value rather than one column per field. `on_create`
 separates what a spawn started with from what the world did to it afterwards.
 
-Resistances are the extreme case. `UNIT_FIELD_RESISTANCES` is `PRIVATE | OWNER | SPECIAL_INFO`,
-so it arrives only for a unit the player owns or controls: **6 guids out of 2,585 in that same
-capture, none of them on create**. Absence is not zero.
+The rows are **aggregated within each sniff** to entry, map, field and value, carrying a distinct
+guid count. Per-guid rows cost 94 MB on a single capture - 4.7x `creature_waypoint`, previously
+the big table - and were almost all repetition, since guids of one entry overwhelmingly agree.
+Aggregated it is 8.5 MB, an 11x cut, and `entry_value` sums the counts to the same answer:
+`speed_walk` and `speed_run` verdicts came out identical either way.
+
+What that costs is per-guid identity. `creature_addon` style work at the spawn level cannot be
+done from this table any more. One signal was worth keeping and is kept explicitly:
+`changed_guids` says how many creatures held **more than one** value for a field, which
+separates *one creature that changed* from *two that always disagreed* - a bare count cannot.
+
+Two collection paths feed it, and both are needed. Folding update blocks gives the history and
+the `on_create` flag, but a field that never appears in a block the collector sees is simply
+absent: that alone covered **1,167 of 8,046 spawns** for faction. A sweep of the merged
+`UnitData` at the end - where the old `creature_spawn.faction` column read from - brings it to
+**8,047 of 8,047**.
+
+Resistances stay the extreme case. `UNIT_FIELD_RESISTANCES` is `PRIVATE | OWNER | SPECIAL_INFO`,
+so it arrives only for a unit the player owns or controls: **6 guids out of 2,585**, none of them
+on create. Absence is not zero.
+
+**Speeds are create-time only.** Nothing writes `SMSG_MOVE_SPLINE_SET_RUN_SPEED` back to the
+stored object, so an aura that changes speed mid-sniff does not appear here. That is the right
+value for `creature_template.speed_run` - the base before buffs - but it is not every speed the
+creature had.
 
 ### `creature_spell_cast` and `creature_aura` are not the same table
 

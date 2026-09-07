@@ -259,12 +259,13 @@ namespace WowPacketParser.Store.Objects
     public sealed class CreatureValueRecord
     {
         public ulong SniffId;
-        public string Guid;
         public uint Entry;
         public uint Map;
         public string Field;
         public decimal Value;
-        public bool OnCreate;
+        public int Guids;
+        public int OnCreateGuids;
+        public int ChangedGuids;
         public int Observations;
     }
 

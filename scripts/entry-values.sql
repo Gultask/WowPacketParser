@@ -1,24 +1,29 @@
 -- What values does a creature entry accept?
 --
--- `creature_value` records one row per distinct value per *guid* per sniff, which is the right
--- shape to store but the wrong shape to answer with. This rolls it up to the entry.
+-- `creature_value` already counts distinct guids within each sniff. This sums those counts
+-- across the corpus, which is the shape the question wants.
 --
--- Guids are the unit of evidence, not rows. One creature standing in view for an hour sends its
--- faction on every update block; another sends it once. Counting rows would let the first drown
--- out the second, so everything below counts DISTINCT guid.
+-- Guids are the unit of evidence, not rows: one creature standing in view for an hour resends
+-- its faction on every update block while another sends it once, and the ingest collapsed that
+-- before storing so the first cannot drown out the second.
+--
+-- Summed, not DISTINCT. The same spawn observed in twenty sniffs contributes twenty, which
+-- weights a value by how often it was actually seen. Guids are not unique across sniffs anyway,
+-- so a corpus-wide DISTINCT would be merging things that only look alike.
 --
 -- Three columns carry the whole argument:
 --
---   guids          how many distinct creatures of this entry were seen with this value
---   guid_share     that as a fraction of all guids of the entry that reported the field
---   on_create_guids how many had it in the block that created them
+--   guid_obs       creature sightings of this entry carrying this value
+--   guid_share     that as a fraction of all sightings of the entry reporting the field
+--   on_create_obs  how many of them had it in the block that created the creature
 --
 -- A value with guid_share = 1.0 is what the entry is. Anything less means the field is
 -- conditional - a faction that flips on a quest, a display id that changes with a disguise -
 -- and the row is evidence about the condition, not about the template.
 --
 -- on_create is the tiebreaker when a field is genuinely split: what a creature spawned with
--- beats what the world did to it afterwards.
+-- beats what the world did to it afterwards. changed_obs separates the two ways a field can be
+-- unsettled - one creature changing during a sniff, or two creatures that always disagreed.
 --
 -- Run after the ingest, against the ingest database. Depends on nothing but `creature_value`,
 -- `creature_aggro`, `creature_spell_cast` and `sniff`.
@@ -31,33 +36,36 @@ CREATE TABLE entry_value (
   entry            INT UNSIGNED  NOT NULL,
   field            VARCHAR(24)   NOT NULL,
   value            DECIMAL(20,6) NOT NULL,
-  guids            INT UNSIGNED  NOT NULL,
-  on_create_guids  INT UNSIGNED  NOT NULL,
+  guid_obs         INT UNSIGNED  NOT NULL COMMENT 'creature sightings, summed over sniffs',
+  on_create_obs    INT UNSIGNED  NOT NULL,
+  changed_obs      INT UNSIGNED  NOT NULL COMMENT 'sightings where that creature held more than one value for this field',
   sniffs           INT UNSIGNED  NOT NULL,
   branches         VARCHAR(64)   NOT NULL,
-  guid_share       DECIMAL(6,4)  NOT NULL COMMENT '1.0 means every guid of this entry agreed',
+  guid_share       DECIMAL(6,4)  NOT NULL COMMENT '1.0 means every sighting of this entry agreed',
   PRIMARY KEY (entry, field, value),
   KEY ix_ev_field (field, value),
   KEY ix_ev_share (entry, field, guid_share)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   COMMENT='What each creature entry was observed accepting, counted by distinct guid.';
 
-INSERT INTO entry_value (entry, field, value, guids, on_create_guids, sniffs, branches, guid_share)
+INSERT INTO entry_value (entry, field, value, guid_obs, on_create_obs, changed_obs,
+                         sniffs, branches, guid_share)
 SELECT v.entry,
        v.field,
        v.value,
-       COUNT(DISTINCT v.guid)                                            AS guids,
-       COUNT(DISTINCT CASE WHEN v.on_create = 1 THEN v.guid END)         AS on_create_guids,
-       COUNT(DISTINCT v.sniff_id)                                        AS sniffs,
-       GROUP_CONCAT(DISTINCT s.branch ORDER BY s.branch SEPARATOR ',')   AS branches,
-       COUNT(DISTINCT v.guid) / t.total_guids                            AS guid_share
+       SUM(v.guids)                                                     AS guid_obs,
+       SUM(v.on_create_guids)                                           AS on_create_obs,
+       MAX(v.changed_guids)                                             AS changed_obs,
+       COUNT(DISTINCT v.sniff_id)                                       AS sniffs,
+       GROUP_CONCAT(DISTINCT s.branch ORDER BY s.branch SEPARATOR ',')  AS branches,
+       SUM(v.guids) / t.total_obs                                       AS guid_share
 FROM   creature_value v
 JOIN   sniff s ON s.id = v.sniff_id
-JOIN   (SELECT entry, field, COUNT(DISTINCT guid) AS total_guids
+JOIN   (SELECT entry, field, SUM(guids) AS total_obs
         FROM   creature_value
         GROUP  BY entry, field) t
        ON t.entry = v.entry AND t.field = v.field
-GROUP  BY v.entry, v.field, v.value, t.total_guids;
+GROUP  BY v.entry, v.field, v.value, t.total_obs;
 
 -- ------------------------------------------------------------- entry_value_best
 -- The single value to use per entry and field, and how much to trust it.
@@ -69,7 +77,7 @@ CREATE TABLE entry_value_best (
   entry       INT UNSIGNED  NOT NULL,
   field       VARCHAR(24)   NOT NULL,
   value       DECIMAL(20,6) NOT NULL,
-  guids       INT UNSIGNED  NOT NULL,
+  guid_obs    INT UNSIGNED  NOT NULL,
   guid_share  DECIMAL(6,4)  NOT NULL,
   alternatives INT UNSIGNED NOT NULL COMMENT 'other values this entry was also seen with',
   verdict     VARCHAR(12)   NOT NULL COMMENT 'settled, dominant or split',
@@ -78,8 +86,8 @@ CREATE TABLE entry_value_best (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   COMMENT='One value per entry and field. verdict says whether the evidence actually agreed.';
 
-INSERT INTO entry_value_best (entry, field, value, guids, guid_share, alternatives, verdict)
-SELECT entry, field, value, guids, guid_share, alternatives,
+INSERT INTO entry_value_best (entry, field, value, guid_obs, guid_share, alternatives, verdict)
+SELECT entry, field, value, guid_obs, guid_share, alternatives,
        CASE WHEN guid_share >= 0.999 THEN 'settled'
             WHEN guid_share >= 0.800 THEN 'dominant'
             ELSE 'split' END AS verdict
@@ -88,8 +96,8 @@ FROM (
          COUNT(*) OVER (PARTITION BY ev.entry, ev.field) - 1 AS alternatives,
          ROW_NUMBER() OVER (PARTITION BY ev.entry, ev.field
                             ORDER BY ev.guid_share DESC,
-                                     ev.on_create_guids DESC,
-                                     ev.guids DESC,
+                                     ev.on_create_obs DESC,
+                                     ev.guid_obs DESC,
                                      ev.value ASC) AS rn
   FROM   entry_value ev
 ) ranked

@@ -172,20 +172,21 @@ CREATE TABLE IF NOT EXISTS `creature_gossip` (
 
         private const string CreatureValueTableDdl = @"
 CREATE TABLE IF NOT EXISTS `creature_value` (
-  `sniff_id`     BIGINT UNSIGNED NOT NULL,
-  `guid`         VARCHAR(40)     NOT NULL,
-  `entry`        INT UNSIGNED    NOT NULL,
-  `map`          INT UNSIGNED    NOT NULL,
-  `field`        VARCHAR(24)     NOT NULL,
-  `value`        DECIMAL(20,6)   NOT NULL COMMENT 'decimal so reaches, radii and speeds land exactly alongside the integer fields',
-  `on_create`    TINYINT(1)      NOT NULL COMMENT 'arrived in the block that created the creature, so it is what the spawn started with',
-  `observations` INT             NOT NULL,
-  PRIMARY KEY (`sniff_id`, `guid`, `field`, `value`),
+  `sniff_id`        BIGINT UNSIGNED NOT NULL,
+  `entry`           INT UNSIGNED    NOT NULL,
+  `map`             INT UNSIGNED    NOT NULL,
+  `field`           VARCHAR(24)     NOT NULL,
+  `value`           DECIMAL(20,6)   NOT NULL COMMENT 'decimal so reaches, radii and speeds land exactly alongside the integer fields',
+  `guids`           INT UNSIGNED    NOT NULL COMMENT 'distinct creatures of this entry seen with this value',
+  `on_create_guids` INT UNSIGNED    NOT NULL COMMENT 'how many had it in the block that created them',
+  `changed_guids`   INT UNSIGNED    NOT NULL COMMENT 'guids of this entry and field seen with more than one value - a creature that changed, not two that differ',
+  `observations`    INT             NOT NULL,
+  PRIMARY KEY (`sniff_id`, `entry`, `map`, `field`, `value`),
   KEY `ix_cvalue_entry` (`entry`, `field`, `value`),
   KEY `ix_cvalue_field` (`field`, `value`),
   CONSTRAINT `fk_cvalue_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-  COMMENT='One row per distinct value a guid was seen carrying. Long format because none of these are constants: faction changes when a quest giver turns hostile, and two guids of one entry can differ for a whole sniff. Resistances are PRIVATE|OWNER|SPECIAL_INFO, so their absence is not zero.';";
+  COMMENT='What each entry was seen carrying, aggregated within the sniff. Counted by distinct guid because one creature standing in view resends its fields on every update block. Long format because none of these are constants. changed_guids separates a creature that changed from two that always differed. Resistances are PRIVATE|OWNER|SPECIAL_INFO, so their absence is not zero.';";
 
         private const string CreatureTemplateTableDdl = @"
 CREATE TABLE IF NOT EXISTS `creature_template` (
@@ -1162,7 +1163,8 @@ CREATE TABLE IF NOT EXISTS `areatrigger_teleport` (
             return SaveRows("creature_gossip", sniffId, CreatureGossipColumns, rows);
         }
 
-        private const string CreatureValueColumns = "guid, entry, map, field, value, on_create, observations";
+        private const string CreatureValueColumns =
+            "entry, map, field, value, guids, on_create_guids, changed_guids, observations";
 
         public static int SaveCreatureValues(ulong sniffId, IReadOnlyList<CreatureValueRecord> values)
         {
@@ -1171,7 +1173,8 @@ CREATE TABLE IF NOT EXISTS `areatrigger_teleport` (
             {
                 rows.Add(new object[]
                 {
-                    v.Guid, v.Entry, v.Map, v.Field, v.Value, v.OnCreate ? 1 : 0, v.Observations
+                    v.Entry, v.Map, v.Field, v.Value, v.Guids, v.OnCreateGuids,
+                    v.ChangedGuids, v.Observations
                 });
             }
 
