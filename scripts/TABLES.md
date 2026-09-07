@@ -34,7 +34,36 @@ the only tables that cannot be rebuilt without re-reading the sniffs, which take
 | `creature_template_spell` | sniff × creature × slot | the action bar of a controlled creature |
 | `creature_quest_item` | sniff × creature × index | quest drops from the creature query response |
 | `creature_gossip` | sniff × creature × menu | which menu a creature opened with |
-| `creature_value` | sniff × guid × field × value | faction, mount, resistances, npc flags, level, model |
+| `creature_value` | sniff × guid × field × value | faction, speeds, resistances, combat reach, bounding radius, attack times, mount, npc flags, level, model |
+| `creature_aggro` | hostile AI reaction | one row per pull, not per creature |
+
+### These belong to the entry, but they are recorded per guid
+
+The question worth asking is what values an *entry* accepts, and `entry-values.sql` answers it
+by rolling `creature_value` up into `entry_value` and `entry_value_best`. The rollup counts
+DISTINCT guid, never rows: a creature standing in view for an hour resends its faction on every
+update block while another sends it once, and counting rows would let the first outvote the
+second.
+
+The per-guid rows are what make the rollup honest, which is why storage stays at that grain.
+Two guids of one entry disagreeing is the signal that a field is conditional, and it is invisible
+the moment guids are merged. `entry_value_best.verdict` reports it: **settled** (every guid
+agreed), **dominant** (at least 80%), **split** (less). On one 3.4.0 capture, 968 entries:
+
+| field | settled | dominant | split |
+|---|---:|---:|---:|
+| `speed_walk` | 966 | 0 | 2 |
+| `speed_run` | 951 | 10 | 7 |
+| `faction_template` | 288 | 0 | 4 |
+| `level` | 251 | 2 | 37 |
+
+**Speeds are already AzerothCore multipliers.** Every handler divides by the 2.5 and 7.0
+baselines before storing, so a text dump printing `RunSpeed: 8` becomes `1.142857` here - which
+is what `creature_template.speed_run` wants. Do not divide again.
+
+`creature_spawn` still carries `faction`, `level`, `unit_flags` and friends from the moment the
+creature was created. Nothing downstream reads them and `creature_value` with `on_create = 1`
+now says the same thing better, so they are redundant rather than wrong.
 
 ### Why `creature_value` is long format
 
@@ -66,6 +95,22 @@ the two tables is what tells them apart, which is exactly why both are kept.
 
 The cast table also holds 4,642 raw events behind those 2,086 distinct pairs. That surplus is
 the timing - the gaps a cooldown is read from - and the aura table cannot supply it at all.
+
+### Initial timers need `creature_aggro`
+
+The gap between two casts of a spell is the repeat timer. The gap from the *pull* to the first
+cast is a different number, and AzerothCore stores both. A creature that opens with a bolt and
+then repeats it every 8s has an initial timer near zero and a repeat near 8000; deriving only
+the repeat would make it silent on the pull.
+
+`creature_aggro` is every hostile `SMSG_AI_REACTION` with its timestamp - one row per pull, not
+per creature, because a reset and re-pull restarts the AI timers. The waypoint collector was
+already reading these packets to tell combat movement from patrol and discarding the times.
+`entry-values.sql` joins them into `spell_initial_gap` and `spell_initial_timer`.
+
+Trust the median, not the max: `max_ms` runs to the 60s bound because it is the first cast of
+*that* spell after the pull, and a spell the creature only reaches late in a fight will sit near
+the ceiling. `pulls` is the sample size - one pull proves nothing.
 
 `sniff_coverage` is the one that is easy to underrate. A sniff that produced no loot because its
 build has no `SMSG_LOOT_RESPONSE` and a sniff that produced no loot because the player looted

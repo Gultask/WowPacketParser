@@ -87,7 +87,8 @@ namespace WowPacketParser.SQL
                                         NpcTextTableDdl, AreaTriggerTeleportTableDdl,
                                         NpcVendorTableDdl, NpcSpellClickTableDdl,
                                         CreatureTemplateSpellTableDdl, CreatureQuestItemTableDdl,
-                                        CreatureGossipTableDdl, CreatureValueTableDdl })
+                                        CreatureGossipTableDdl, CreatureValueTableDdl,
+                                        CreatureAggroTableDdl })
             {
                 using (var cmd = _conn.CreateCommand())
                 {
@@ -175,7 +176,7 @@ CREATE TABLE IF NOT EXISTS `creature_value` (
   `entry`        INT UNSIGNED    NOT NULL,
   `map`          INT UNSIGNED    NOT NULL,
   `field`        VARCHAR(24)     NOT NULL,
-  `value`        BIGINT          NOT NULL,
+  `value`        DECIMAL(20,6)   NOT NULL COMMENT 'decimal so reaches, radii and speeds land exactly alongside the integer fields',
   `on_create`    TINYINT(1)      NOT NULL COMMENT 'arrived in the block that created the creature, so it is what the spawn started with',
   `observations` INT             NOT NULL,
   PRIMARY KEY (`sniff_id`, `guid`, `field`, `value`),
@@ -184,6 +185,19 @@ CREATE TABLE IF NOT EXISTS `creature_value` (
   CONSTRAINT `fk_cvalue_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   COMMENT='One row per distinct value a guid was seen carrying. Long format because none of these are constants: faction changes when a quest giver turns hostile, and two guids of one entry can differ for a whole sniff. Resistances are PRIVATE|OWNER|SPECIAL_INFO, so their absence is not zero.';";
+
+        private const string CreatureAggroTableDdl = @"
+CREATE TABLE IF NOT EXISTS `creature_aggro` (
+  `sniff_id`  BIGINT UNSIGNED NOT NULL,
+  `guid`      VARCHAR(40)     NOT NULL,
+  `entry`     INT UNSIGNED    NOT NULL,
+  `map`       INT UNSIGNED    NOT NULL,
+  `aggro_utc` DATETIME(3)     NOT NULL,
+  PRIMARY KEY (`sniff_id`, `guid`, `aggro_utc`),
+  KEY `ix_caggro_entry` (`entry`, `aggro_utc`),
+  CONSTRAINT `fk_caggro_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Every hostile SMSG_AI_REACTION. One row per pull, not per creature, because each pull restarts the AI timers. The zero point an initial cast timer is measured from.';";
 
         private const string SniffTableDdl = @"
 CREATE TABLE IF NOT EXISTS `sniff` (
@@ -1121,6 +1135,17 @@ CREATE TABLE IF NOT EXISTS `areatrigger_teleport` (
             }
 
             return SaveRows("creature_value", sniffId, CreatureValueColumns, rows, 1000);
+        }
+
+        private const string CreatureAggroColumns = "guid, entry, map, aggro_utc";
+
+        public static int SaveCreatureAggro(ulong sniffId, IReadOnlyList<CreatureAggroRecord> aggro)
+        {
+            var rows = new List<object[]>(aggro.Count);
+            foreach (var a in aggro)
+                rows.Add(new object[] { a.Guid, a.Entry, a.Map, a.AggroUtc });
+
+            return SaveRows("creature_aggro", sniffId, CreatureAggroColumns, rows, 1000);
         }
 
         private const string CreatureEquipColumns = "guid, entry, map, item_id1, item_id2, item_id3";

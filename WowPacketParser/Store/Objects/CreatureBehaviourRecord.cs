@@ -263,8 +263,26 @@ namespace WowPacketParser.Store.Objects
         public uint Entry;
         public uint Map;
         public string Field;
-        public long Value;
+        public decimal Value;
         public bool OnCreate;
         public int Observations;
+    }
+
+    /// <summary>
+    /// A creature entering combat, from SMSG_AI_REACTION with a hostile reaction.
+    ///
+    /// Kept per event rather than per guid because a creature can be pulled, reset and pulled
+    /// again, and each pull restarts whatever timer the AI runs on. This is the zero point an
+    /// initial cast timer is measured from: the gap to the first SMSG_SPELL_START after it is
+    /// the delay AzerothCore stores as CastStartTimeMin/Max, which is a different number from
+    /// the gap between two later casts of the same spell.
+    /// </summary>
+    public sealed class CreatureAggroRecord
+    {
+        public ulong SniffId;
+        public string Guid;
+        public uint Entry;
+        public uint Map;
+        public DateTime? AggroUtc;
     }
 }

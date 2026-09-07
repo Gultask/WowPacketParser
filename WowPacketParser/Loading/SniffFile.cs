@@ -816,6 +816,13 @@ namespace WowPacketParser.Loading
                 coverage.Add(Coverage(CollectorVersion.CreatureValue, CollectorVersion.CreatureValueVersion,
                                       valueWritten, Opcode.SMSG_UPDATE_OBJECT));
 
+                var aggro = CollectCreatureAggro(sniffId, packets);
+                var aggroWritten = IngestDatabase.SaveCreatureAggro(sniffId, aggro);
+                if (aggro.Count > 0)
+                    Trace.WriteLine($"{_logPrefix}: {aggroWritten} creature pulls recorded");
+                coverage.Add(Coverage(CollectorVersion.CreatureAggro, CollectorVersion.CreatureAggroVersion,
+                                      aggroWritten, Opcode.SMSG_AI_REACTION));
+
                 var teleports = CollectAreaTriggerTeleports(sniffId, packets);
                 var teleWritten = IngestDatabase.SaveAreaTriggerTeleports(sniffId, teleports);
                 if (teleports.Count > 0)
@@ -1314,7 +1321,7 @@ namespace WowPacketParser.Loading
         ///
         /// Runs on the write stage, which is single threaded, so a plain dictionary is safe.
         /// </summary>
-        private readonly Dictionary<(string Guid, string Field, long Value), CreatureValueRecord> _creatureValues = new();
+        private readonly Dictionary<(string Guid, string Field, decimal Value), CreatureValueRecord> _creatureValues = new();
 
         private static readonly string[] LegacyValueFields =
         {
@@ -1341,7 +1348,7 @@ namespace WowPacketParser.Loading
             if (guid.Type != UniversalHighGuid.Creature && guid.Type != UniversalHighGuid.Vehicle)
                 return;
 
-            void Record(string field, long value)
+            void Record(string field, decimal value)
             {
                 var id = (key, field, value);
                 if (_creatureValues.TryGetValue(id, out var existing))
@@ -1375,6 +1382,19 @@ namespace WowPacketParser.Loading
                     Record("display_id", unit.DisplayID.Value);
                 if (unit.NativeDisplayID != null)
                     Record("native_display_id", unit.NativeDisplayID.Value);
+                if (unit.CombatReach != null)
+                    Record("combat_reach", (decimal)unit.CombatReach.Value);
+                if (unit.BoundingRadius != null)
+                    Record("bounding_radius", (decimal)unit.BoundingRadius.Value);
+
+                for (var i = 0; i < unit.AttackRoundBaseTime.Count; i++)
+                {
+                    if (unit.AttackRoundBaseTime[i]?.Value != null)
+                        Record("attack_time_" + i, unit.AttackRoundBaseTime[i].Value.Value);
+                }
+
+                if (unit.RangedAttackRoundBaseTime != null)
+                    Record("ranged_attack_time", unit.RangedAttackRoundBaseTime.Value);
 
                 for (var i = 0; i < unit.NpcFlags.Count; i++)
                 {
@@ -1425,6 +1445,91 @@ namespace WowPacketParser.Loading
         }
 
         /// <summary>
+        /// Speeds, which do not travel with the other unit fields.
+        ///
+        /// They ride on the create block's movement update, and a stationary creature is not
+        /// sent one - which is most of a questing capture, so reading the holder collected
+        /// nothing. WoWObject.Movement is filled on every create, so they are read from there.
+        ///
+        /// Already divided by the 2.5 and 7.0 baselines by the handlers, so these are the
+        /// multipliers AzerothCore's speed_walk and speed_run want. Do not divide again.
+        /// </summary>
+        private void FoldMovement(string key, string field, decimal value)
+        {
+            if (key == null || value <= 0)
+                return;
+
+            var id = (key, field, value);
+            if (_creatureValues.TryGetValue(id, out var existing))
+            {
+                existing.Observations++;
+                existing.OnCreate = true;
+                return;
+            }
+
+            _creatureValues[id] = new CreatureValueRecord
+            {
+                Guid = key,
+                Field = field,
+                Value = value,
+                OnCreate = true,
+                Observations = 1
+            };
+        }
+
+        /// <summary>
+        /// Every hostile AI reaction, with its time. The waypoint collector already reads these
+        /// to tell combat movement from patrol, but keeps only the guid; the timestamp is what
+        /// an initial cast timer is measured from.
+        /// </summary>
+        private List<CreatureAggroRecord> CollectCreatureAggro(ulong sniffId, Packets packets)
+        {
+            var aggro = new List<CreatureAggroRecord>();
+            if (packets == null)
+                return aggro;
+
+            var known = new Dictionary<string, (uint Entry, uint Map)>();
+            foreach (var pair in Storage.Objects)
+            {
+                var obj = pair.Value.Item1;
+                if (obj.Type != ObjectType.Unit)
+                    continue;
+
+                var entry = obj.ObjectData?.EntryID;
+                if (entry == null || entry == 0)
+                    continue;
+
+                known[GuidKey(pair.Key)] = ((uint)entry, obj.Map);
+            }
+
+            var seen = new HashSet<(string, DateTime)>();
+            foreach (var holder in packets.Packets_)
+            {
+                if (holder.AiReaction == null || holder.AiReaction.Reaction != Proto.AIReaction.Hostile)
+                    continue;
+
+                var key = GuidKey(holder.AiReaction.UnitGuid);
+                var when = holder.BaseData?.Time?.ToDateTime();
+                if (key == null || when == null || !known.TryGetValue(key, out var unit))
+                    continue;
+
+                if (!seen.Add((key, when.Value)))
+                    continue;
+
+                aggro.Add(new CreatureAggroRecord
+                {
+                    SniffId = sniffId,
+                    Guid = key,
+                    Entry = unit.Entry,
+                    Map = unit.Map,
+                    AggroUtc = when
+                });
+            }
+
+            return aggro;
+        }
+
+        /// <summary>
         /// Attaches entry and map to the folded values and drops the rest. A guid the sniff
         /// never created has no entry to attribute the value to, so it cannot be used.
         /// </summary>
@@ -1441,7 +1546,14 @@ namespace WowPacketParser.Loading
                 if (entry == null || entry == 0)
                     continue;
 
-                known[GuidKey(pair.Key)] = ((uint)entry, obj.Map);
+                var key = GuidKey(pair.Key);
+                known[key] = ((uint)entry, obj.Map);
+
+                if (obj.Movement != null)
+                {
+                    FoldMovement(key, "speed_walk", (decimal)obj.Movement.WalkSpeed);
+                    FoldMovement(key, "speed_run", (decimal)obj.Movement.RunSpeed);
+                }
             }
 
             var values = new List<CreatureValueRecord>();

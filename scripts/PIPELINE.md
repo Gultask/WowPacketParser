@@ -131,7 +131,11 @@ that evidence comes from.
 Beyond spawns, waypoints and loot: `creature_spell_cast` (every SMSG_SPELL_START by a creature,
 raw), `spell_target`, `spell_destination`, `creature_equip`, `creature_aura`, `gossip_menu`,
 `gossip_menu_option`, `npc_text`, `areatrigger_teleport`, `npc_vendor`, `npc_spellclick`,
-`creature_template_spell`, `creature_quest_item`, `creature_gossip` and `creature_value`.
+`creature_template_spell`, `creature_quest_item`, `creature_gossip`, `creature_value` and
+`creature_aggro`.
+
+Run `entry-values.sql` afterwards to roll the per-guid values up to the entry - `entry_value`,
+`entry_value_best` - and to derive initial cast timers from the pulls.
 
 **A trap worth knowing about.** Most of those last six read from `Storage` bags that the parser
 switches off unless their `SQLOutput` flag is set - `StoreBag.Add` is a no-op when disabled - and
