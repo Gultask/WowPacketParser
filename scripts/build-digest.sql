@@ -86,6 +86,36 @@ CREATE TABLE dg_est (
   KEY ix_grid (entry, map, gx, gy, gz)
 ) ENGINE=InnoDB;
 
+-- The three appearance fields, per entry, and only where every observation of the entry
+-- agreed. creature_spawn carried them per guid until they were moved to creature_value, which
+-- aggregates within the sniff - so per-spawn-point agreement is no longer askable and per-entry
+-- agreement stands in. It is the stronger claim of the two.
+--
+-- Sentinels are the ones the digest already used: 0 for emote, which also means "no emote to
+-- report", and 255 for stand and sheathe, which means the observations disagreed.
+DROP TABLE IF EXISTS dg_state;
+CREATE TABLE dg_state (
+  entry         INT UNSIGNED     NOT NULL,
+  emote_state   INT UNSIGNED     NOT NULL,
+  stand_state   TINYINT UNSIGNED NOT NULL,
+  sheathe_state TINYINT UNSIGNED NOT NULL,
+  PRIMARY KEY (entry)
+) ENGINE=InnoDB;
+
+INSERT INTO dg_state (entry, emote_state, stand_state, sheathe_state)
+SELECT entry,
+       COALESCE(MAX(CASE WHEN field = 'emote_state'   THEN v END),   0),
+       COALESCE(MAX(CASE WHEN field = 'stand_state'   THEN v END), 255),
+       COALESCE(MAX(CASE WHEN field = 'sheathe_state' THEN v END), 255)
+FROM (
+  SELECT entry, field,
+         CASE WHEN COUNT(DISTINCT value) = 1 THEN CAST(MIN(value) AS UNSIGNED) END AS v
+  FROM   creature_value
+  WHERE  field IN ('emote_state', 'stand_state', 'sheathe_state')
+  GROUP  BY entry, field
+) a
+GROUP  BY entry;
+
 INSERT INTO dg_est
 SELECT s.sniff_id, s.guid, s.entry, s.map,
        CASE WHEN s.create_type = 2 THEN s.position_x
@@ -100,7 +130,7 @@ SELECT s.sniff_id, s.guid, s.entry, s.map,
        COALESCE(m.radius_robust, 0),
        COALESCE(f.client_build, 0),
        f.branch,
-       COALESCE(s.emote_state, 0), COALESCE(s.stand_state, 0), COALESCE(s.sheathe_state, 0),
+       COALESCE(st.emote_state, 0), COALESCE(st.stand_state, 255), COALESCE(st.sheathe_state, 255),
        0, 0, 0,   -- grid key, filled in below from the STORED position
        -- centimetre-resolution packing, so exact positions group without float equality.
        -- Built from the RAW position, which equals the stored position for kinds 1 and 2;
@@ -110,7 +140,8 @@ SELECT s.sniff_id, s.guid, s.entry, s.map,
      |  (CAST(ROUND((s.position_z + 2100) * 10) AS SIGNED) & 65535)
 FROM creature_spawn s
 LEFT JOIN creature_movement m ON m.sniff_id = s.sniff_id AND m.guid = s.guid
-LEFT JOIN sniff f ON f.id = s.sniff_id;
+LEFT JOIN sniff f ON f.id = s.sniff_id
+LEFT JOIN dg_state st ON st.entry = s.entry;
 -- Rounded from the STORED float, not from the expression above: rounding a double and then
 -- narrowing it to FLOAT can land the other side of a .5 boundary from rounding the FLOAT
 -- itself, and a point in the wrong grid cell silently loses its radius to a missed join.
@@ -469,8 +500,12 @@ SELECT d.entry, d.map, d.x, d.y, d.z, d.o, d.accuracy, d.radius, d.patrols,
        d.wotlk_sniffs, d.tbc_sniffs, d.classic_sniffs,
        d.emote_state, d.stand_state, d.sheathe_state, d.radius_unmeasured
 FROM dg_spawn d
-LEFT JOIN (SELECT entry FROM creature_spawn
-           GROUP BY entry HAVING MIN((unit_flags & 0x02000000) > 0) = 1) tr ON tr.entry = d.entry;
+-- From creature_value, and from the RAW value: NOT_SELECTABLE is one of the runtime bits
+-- entry-values.sql masks away, so entry_value would answer this question with a zero.
+LEFT JOIN (SELECT entry FROM creature_value
+           WHERE field = 'unit_flags'
+           GROUP BY entry
+           HAVING MIN((CAST(value AS UNSIGNED) & 0x02000000) > 0) = 1) tr ON tr.entry = d.entry;
 
 -- ---------------------------------------------------------------------------------------
 -- Phase 6: publish the routes. Same filter phase 4c uses to call a spawn a patroller - a
