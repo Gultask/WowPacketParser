@@ -15,6 +15,9 @@ belongs in a script before the session ends, because a year from now nobody will
   ingest-sniffs.ps1        .pkt / .7z  ->  wpp_ingest              hours to days
         |
         v
+  recover-co2.sql          rebuilds create_type for silent clients          ~1 min
+        |
+        v
   mine-paths.sh            creature_waypoint -> path_summary, path_point   ~1 h 35 m
         |
         v
@@ -28,11 +31,15 @@ belongs in a script before the session ends, because a year from now nobody will
   make-release.sh          -> 9 per-table files, into the module tree   ~1 min 20 s
 ```
 
-The two arrows that matter:
+The three arrows that matter:
 
 - **`mine-paths.sh` must run before `build-digest.sql`.** The digest reads `path_point` twice:
   phase 4c decides whether a spawn patrols by how near it sits to a route, and phase 6 copies
   the routes across. Run them the other way round and both describe the previous mining.
+- **`recover-co2.sql` must run before `build-digest.sql`.** It edits `creature_spawn.create_type`
+  in place, and the digest reads that column to choose both the published position and the
+  accuracy. Run it after the digest and the corpus is right while everything published from it
+  is a round behind.
 - **`publish-loot.sql` is independent.** It reads `loot_instance` and `gameobject_spawn` and
   touches nothing the digest uses, so it can run whenever.
 
@@ -168,6 +175,38 @@ Loot refuses to run on Mists and later: area looting lets one response cover sev
 the collector's one-loot-per-owner model does not hold and it would record confident nonsense.
 The `sniff_coverage` row says so rather than leaving a silent zero. Cataclysm loot parses fine -
 verified on 4.4.1, which reports `empty` rather than `unsupported`.
+
+### 1b. Recover the CreateObject2 flag
+
+```
+mysql -u root -p wpp_ingest2 < recover-co2.sql
+```
+
+Run this after every ingest, before anything reads `creature_spawn`. It is fast and it is a
+no-op when there is nothing to fix.
+
+The Anniversary client line - TBC 2.5.5 / 2.5.6, builds 65417 and up - does not send
+`UpdateType 2` at all, so every spawn arrives as CreateObject1. That was worth 258,230 spawn
+rows and 149,528 gameobject rows across 182 sniffs with not one CO2 among them, including whole
+zones captured deliberately for their spawn points. The parser was reading the byte correctly;
+the client had stopped sending it. Confirmed by the fact that `GetVersionDefiningBuild` routes
+those builds to the same module as MoP Classic, which still produces CO2 at build 64857 through
+that identical code path.
+
+`WowPacketParserModule.V5_5_0_61735/Parsers/UpdateHandler.cs` now carries the same
+`TreatAsCreateObject2` reconstruction that upstream added to V11 and V12, gated on build 65417
+so MoP Classic keeps its real flag. **That fixes new ingests only** - this script is what fixes
+sniffs already in the corpus, and the two agree because both read
+`TreatAsCreateObject2Tolerance`, set to 2 in `App.config`.
+
+It picks its targets by client build, never by individual sniff: a build qualifies on having a
+thousand-plus spawn rows and exactly zero CO2, then is remembered in `co2_recovered_build` so
+later sniffs on the same build are caught too. Do not be tempted to widen this to "any sniff
+with no CO2" - 244 sniffs here have 200+ spawn rows and no CO2 for the ordinary reason that
+nothing respawned in view, and most of them are WotLK, where capture works fine.
+
+Every changed row is listed in `co2_recovered` first, so it is reversible. The script's header
+carries the validation and the tolerance table.
 
 ### 2. Mine the routes
 

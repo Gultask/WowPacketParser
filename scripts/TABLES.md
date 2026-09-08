@@ -63,6 +63,35 @@ agreed), **dominant** (at least 80%), **split** (less). On one 3.4.0 capture, 96
 baselines before storing, so a text dump printing `RunSpeed: 8` becomes `1.142857` here - which
 is what `creature_template.speed_run` wants. Do not divide again.
 
+### `create_type` is reconstructed for clients that stopped sending it
+
+`creature_spawn.create_type` is the whole basis of the digest's accuracy column: 2 means the
+sniff caught the creature in the act of spawning, and only those points are published as
+accuracy 2. So a client that stops reporting it costs the corpus its best evidence silently.
+
+The Anniversary line does exactly that. TBC 2.5.5 / 2.5.6 from build 65417 never sends
+`UpdateType 2` - 258,230 spawn rows and 149,528 gameobject rows across 182 sniffs, not one CO2
+among them, including zones captured specifically to record spawn points. Nothing was
+mis-parsed: `GetVersionDefiningBuild` sends those builds to the same module as MoP Classic, and
+MoP at build 64857 still produces CO2 through that identical code. The packets simply no longer
+carry it.
+
+It is recoverable because modern GUIDs carry the object's spawn timestamp in the low 23 bits of
+their low half. If that is within a couple of seconds of the packet that created the object,
+the object had just spawned. Upstream does this on retail as `TreatAsCreateObject2`; the fork
+now does it in `V5_5_0_61735` for new ingests, and `scripts/recover-co2.sql` does it after the
+fact for sniffs already stored.
+
+**What this means when reading the table.** Some CO2 rows are now inferred rather than reported,
+at a measured 93.2% precision and 91.0% recall. `co2_recovered` lists every one of them, so a
+query that must have only client-reported CO2 can exclude them by joining it. Nothing else
+should: the digest treats both alike on purpose.
+
+**Do not widen the recovery to "any sniff with no CO2".** 244 sniffs here have 200+ spawn rows
+and no CO2 for the ordinary reason that nothing respawned while the sniffer was watching, and
+most of them are WotLK, where capture works fine. The gate is per client build, where a
+thousand-row sample with zero CO2 is not something chance produces.
+
 ### `unit_flags` is a third runtime state
 
 `unit_flags` is the most unstable field in `creature_value` - 1.293 values per entry per sniff,
@@ -216,7 +245,8 @@ Re-running the script drops and recreates these, so losing them costs only time.
 |---|---|---|
 | `wp_point`, `wp_node`, `wp_edge`, `wp_edge_raw`, `wp_level`, `wp_stack`, `wp_zobs` | `mine-paths.sql` | ~1 h 35 m |
 | `path_summary`, `path_point` | `mine-paths.sh` (via `chain-paths.py`) | 11 s once the graph exists |
-| `dg_spawn`, `dg_est`, `dg_approx`, `dg_fixed`, `dg_inst_rad`, `dg_rad_key`, `dg_route_pt` | `build-digest.sql` | ~4 h |
+| `dg_spawn`, `dg_est`, `dg_approx`, `dg_fixed`, `dg_inst_rad`, `dg_rad_key`, `dg_route_pt`, `dg_state` | `build-digest.sql` | ~4 h |
+| `co2_recovered`, `co2_recovered_build` | `recover-co2.sql` | ~1 min. **Additive, not dropped** - they are the record of which rows it changed, and deleting them loses the ability to undo it. |
 | `entry_value`, `entry_value_best`, `spell_initial_gap`, `spell_initial_timer`, `waypoint_segment_speed`, `entry_travel_mode` | `entry-values.sql` | minutes |
 | `aura_trusted_sniff`, `entry_controlled`, `spell_aura`, `entry_aura` | `entry-auras.sql` | ~7 min |
 | `st_gap`, `st_timer` | `spell-timers.sql` | minutes |
