@@ -6,7 +6,7 @@
 # sniff at a time keeps each transaction small, lets the run be interrupted safely, and prints
 # where it got to.
 set -u
-DB=${DB:-wpp_ingest}
+DB=${DB:-wpp_ingest2}
 MYSQL="mysql -uroot -proot $DB --batch --skip-column-names"
 
 total=0

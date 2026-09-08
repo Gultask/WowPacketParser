@@ -6,9 +6,10 @@
 # path_point every time. Budget an hour - phase 1 and phase 2 each scan creature_waypoint.
 #
 #   ./mine-paths.sh [workdir]
+#   DB=other-database ./mine-paths.sh
 set -euo pipefail
 
-DB=wpp_ingest
+DB=${DB:-wpp_ingest2}
 MYSQL="mysql -u root -proot --local-infile=1"
 WORK="${1:-/c/WowPacketParser/scripts/.paths}"
 HERE="$(cd "$(dirname "$0")" && pwd)"

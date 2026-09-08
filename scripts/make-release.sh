@@ -103,9 +103,10 @@ fi
 # history. Stamping the data's own end date makes an unchanged table reproduce byte for byte,
 # so a re-release commits only what actually moved. It is also the more useful fact: a reader
 # wants to know how far the evidence runs, not which day somebody typed the command.
-STAMP=$(mysql -u "$MYSQL_USER" "-p$MYSQL_PASS" -N -B -e "SELECT DATE(MAX(last_packet_utc)) FROM wpp_ingest.sniff;" 2>/dev/null || echo 'unknown')
+INGEST_DB=${INGEST_DB:-wpp_ingest2}
+STAMP=$(mysql -u "$MYSQL_USER" "-p$MYSQL_PASS" -N -B -e "SELECT DATE(MAX(last_packet_utc)) FROM $INGEST_DB.sniff;" 2>/dev/null || echo 'unknown')
 SNIFFS=$(mysql -u "$MYSQL_USER" "-p$MYSQL_PASS" -N -B -e \
-         "SELECT COUNT(*) FROM wpp_ingest.sniff;" 2>/dev/null || echo '?')
+         "SELECT COUNT(*) FROM $INGEST_DB.sniff;" 2>/dev/null || echo '?')
 
 # Every file opens with the same provenance block. It is repeated rather than referenced because
 # these files travel one at a time - somebody handed sniff_loot_set.sql on its own still has to
