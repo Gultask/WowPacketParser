@@ -167,13 +167,23 @@ CREATE TABLE spell_initial_timer (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   COMMENT='Initial cast delay per entry and spell. pulls is the sample size - one pull proves nothing.';
 
+--
+-- The median is taken by rank, not by cutting a GROUP_CONCAT in half. One entry has 52,080
+-- pulls of a single spell, far past what `group_concat_max_len` holds, and a truncated list
+-- loses its tail - which would move the median without saying so.
 INSERT INTO spell_initial_timer (entry, spell_id, pulls, min_ms, median_ms, max_ms)
-SELECT entry, spell_id, COUNT(*) AS pulls,
-       MIN(gap_ms) AS min_ms,
-       CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(GROUP_CONCAT(gap_ms ORDER BY gap_ms), ',',
-            CEIL(COUNT(*) / 2)), ',', -1) AS SIGNED) AS median_ms,
-       MAX(gap_ms) AS max_ms
-FROM   spell_initial_gap
+WITH ranked AS (
+  SELECT entry, spell_id, gap_ms,
+         ROW_NUMBER() OVER (PARTITION BY entry, spell_id ORDER BY gap_ms) AS rn,
+         COUNT(*)     OVER (PARTITION BY entry, spell_id)                 AS n
+  FROM   spell_initial_gap
+)
+SELECT entry, spell_id,
+       MAX(n)                                       AS pulls,
+       MIN(gap_ms)                                  AS min_ms,
+       MAX(CASE WHEN rn = CEIL(n / 2) THEN gap_ms END) AS median_ms,
+       MAX(gap_ms)                                  AS max_ms
+FROM   ranked
 GROUP  BY entry, spell_id;
 
 -- ------------------------------------------------------------------- sanity
@@ -258,10 +268,16 @@ SELECT m.entry, ct.movement_id, m.segments, m.median_yd_s,
             WHEN ABS(m.median_yd_s - r.value * 7.0) <= 0.15 * r.value * 7.0 THEN 'run'
             ELSE 'other' END AS mode
 FROM (
-  SELECT entry, COUNT(*) AS segments,
-         CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(GROUP_CONCAT(yards_sec ORDER BY yards_sec), ',',
-              CEIL(COUNT(*) / 2)), ',', -1) AS DECIMAL(10,4)) AS median_yd_s
-  FROM   waypoint_segment_speed
+  -- By rank rather than by string, for the reason spell_initial_timer gives above.
+  SELECT entry,
+         MAX(n)                                            AS segments,
+         MAX(CASE WHEN rn = CEIL(n / 2) THEN yards_sec END) AS median_yd_s
+  FROM (
+    SELECT entry, yards_sec,
+           ROW_NUMBER() OVER (PARTITION BY entry ORDER BY yards_sec) AS rn,
+           COUNT(*)     OVER (PARTITION BY entry)                    AS n
+    FROM   waypoint_segment_speed
+  ) r
   GROUP  BY entry
 ) m
 LEFT JOIN entry_value_best w  ON w.entry = m.entry AND w.field = 'speed_walk'
