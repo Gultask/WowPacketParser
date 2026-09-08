@@ -150,7 +150,7 @@ namespace WowPacketParserModule.V5_5_0_61735.Parsers
                         CombatLogHandler.ReadContentTuningParams(packet, i, "ContentTuning");
 
                     if (hasCastUnit)
-                        auraEntry.CasterUnit = packet.ReadPackedGuid128("CastUnit", i);
+                        auraEntry.CasterUnit = aura.CasterGuid = packet.ReadPackedGuid128("CastUnit", i);
 
                     if (hasCastItem)
                         packet.ReadPackedGuid128("CastItem", i);

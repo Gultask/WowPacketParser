@@ -30,6 +30,16 @@
 
 SET SESSION group_concat_max_len = 8192;
 
+-- The bits the server sets while the world is running, stripped before the vote. These are
+-- WowPacketParser's UnitFlags.Disallowed and friends, inverted: what is left is what upstream
+-- lets through into creature_template. Changing one means changing WowPacketParser/Enums/
+-- UnitFlags*.cs to match, or the ingest and the text dump start disagreeing.
+--   unit_flags  keeps 0x02000342  NonAttackable, ImmuneToPc, ImmuneToNpc, NotSelectable, 0x40
+--   unit_flags2 keeps 0x04030822  HideBody, InstantlyDontFadeIn, RegeneratePower, Unk2,
+--                                 PlayDeathAnim, UntargetableByClient
+--   unit_flags3 keeps 0xFFEDDEBF  everything but AltLanguage, IgnoreCombat, FakeDead,
+--                                 AlreadySkinned, InteractWhileInCombat
+
 -- ---------------------------------------------------------------- entry_value
 DROP TABLE IF EXISTS entry_value;
 CREATE TABLE entry_value (
@@ -59,7 +69,14 @@ SELECT v.entry,
        COUNT(DISTINCT v.sniff_id)                                       AS sniffs,
        GROUP_CONCAT(DISTINCT s.branch ORDER BY s.branch SEPARATOR ',')  AS branches,
        SUM(v.guids) / t.total_obs                                       AS guid_share
-FROM   creature_value v
+FROM   (SELECT sniff_id, entry, field, guids, on_create_guids, changed_guids,
+               CASE field
+                 WHEN 'unit_flags'  THEN CAST(value AS UNSIGNED) &   33555266
+                 WHEN 'unit_flags2' THEN CAST(value AS UNSIGNED) &   67307554
+                 WHEN 'unit_flags3' THEN CAST(value AS UNSIGNED) & 4293779135
+                 ELSE value
+               END AS value
+        FROM   creature_value) v
 JOIN   sniff s ON s.id = v.sniff_id
 JOIN   (SELECT entry, field, SUM(guids) AS total_obs
         FROM   creature_value

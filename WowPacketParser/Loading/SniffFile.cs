@@ -2035,16 +2035,20 @@ namespace WowPacketParser.Loading
                             Entry = (uint)entry,
                             Map = obj.Map,
                             SpellId = aura.SpellId,
-                            SelfCast = aura.CasterGuid == null || aura.CasterGuid.IsEmpty() ||
-                                       aura.CasterGuid == pair.Key
+                            Caster = CasterOf(aura, pair.Key)
                         };
                     }
 
                     row.Observations++;
                     if (onCreate)
                         row.OnCreate = true;
-                    if (aura.MaxDuration != 0 && (row.MaxDurationMs == null || aura.MaxDuration > row.MaxDurationMs))
-                        row.MaxDurationMs = aura.MaxDuration;
+
+                    // The two readers disagree about which field is which: the legacy block puts
+                    // the total in MaxDuration and the time left in Duration, every module written
+                    // since puts them the other way round. The larger is the total either way.
+                    var total = Math.Max(aura.Duration, aura.MaxDuration);
+                    if (total > 0 && (row.DurationMs == null || total > row.DurationMs))
+                        row.DurationMs = total;
                 }
 
                 if (unit.Auras != null)
@@ -2068,6 +2072,33 @@ namespace WowPacketParser.Loading
             }
 
             return auras;
+        }
+
+        /// <summary>
+        /// Who put the aura there: 0 another unit, 1 the creature itself, 2 no idea.
+        ///
+        /// The NoCaster flag is the server saying "the caster is the target", and it is the only
+        /// answer available on every branch, so it is asked first. A guid is the next best thing.
+        /// When neither is present the answer is 2 and stays 2 - guessing self is how a whole
+        /// corpus came to claim that creatures cast Corruption on themselves.
+        /// </summary>
+        private static byte CasterOf(Aura aura, WowGuid unit)
+        {
+            var flags = aura.AuraFlags switch
+            {
+                AuraFlagMoP m => m.ToUniversal(),
+                AuraFlagClassic c => c.ToUniversal(),
+                AuraFlag a => a.ToUniversal(),
+                _ => UniversalAuraFlag.None
+            };
+
+            if (flags.HasFlag(UniversalAuraFlag.NoCaster))
+                return 1;
+
+            if (aura.CasterGuid == null || aura.CasterGuid.IsEmpty())
+                return 2;
+
+            return aura.CasterGuid == unit ? (byte)1 : (byte)0;
         }
 
         /// <summary>Gossip menus, their options and the texts they point at.</summary>

@@ -80,7 +80,7 @@
         public const int SpellTargetVersion = 1;
         public const int SpellDestinationVersion = 1;
         public const int CreatureEquipVersion = 1;
-        public const int CreatureAuraVersion = 1;
+        public const int CreatureAuraVersion = 2; // self_cast tells unknown from self
         public const int GossipVersion = 1;
         public const int AreaTriggerTeleportVersion = 1;
         public const int NpcVendorVersion = 1;

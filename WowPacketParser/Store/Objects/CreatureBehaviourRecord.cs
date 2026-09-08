@@ -94,12 +94,16 @@ namespace WowPacketParser.Store.Objects
         public uint Entry;
         public uint Map;
         public uint SpellId;
-        public bool SelfCast;
 
-        /// <summary>Set when the aura was already on the creature in the block that created it.</summary>
+        /// <summary>0 someone else cast it, 1 the creature itself, 2 the packet did not say.</summary>
+        public byte Caster;
+
+        /// <summary>Set when the aura was in the first aura update seen for this guid.</summary>
         public bool OnCreate;
         public int Observations;
-        public int? MaxDurationMs;
+
+        /// <summary>Longest total duration seen, null when the aura never carried one.</summary>
+        public int? DurationMs;
     }
 
     /// <summary>A gossip menu as the server sent it, with the creature that opened it.</summary>

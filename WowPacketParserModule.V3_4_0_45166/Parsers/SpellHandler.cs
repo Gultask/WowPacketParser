@@ -739,7 +739,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
                         CombatLogHandler.ReadContentTuningParams(packet, i, "ContentTuning");
 
                     if (hasCastUnit)
-                        auraEntry.CasterUnit = packet.ReadPackedGuid128("CastUnit", i);
+                        auraEntry.CasterUnit = aura.CasterGuid = packet.ReadPackedGuid128("CastUnit", i);
 
                     aura.Duration = hasDuration ? packet.ReadInt32("Duration", i) : 0;
                     aura.MaxDuration = hasRemaining ? packet.ReadInt32("Remaining", i) : 0;

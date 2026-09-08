@@ -26,7 +26,7 @@ the only tables that cannot be rebuilt without re-reading the sniffs, which take
 | `spell_target` | sniff × spell × target entry | what an entry-targeted spell actually hit |
 | `spell_destination` | sniff × spell × point | where a ground-targeted spell was aimed |
 | `creature_equip` | sniff × creature | the three virtual item slots |
-| `creature_aura` | sniff × creature × spell | with a flag for auras present at creation |
+| `creature_aura` | sniff × creature × spell | mostly the player's own debuffs; `entry-auras.sql` sorts them |
 | `gossip_menu` / `gossip_menu_option` / `npc_text` | menu, option, text | as the server sent them |
 | `areatrigger_teleport` | trigger paired to a world change | `delay_ms` says how much to trust the pairing |
 | `npc_vendor` | sniff × vendor × slot | the list as the player was shown it |
@@ -62,6 +62,23 @@ agreed), **dominant** (at least 80%), **split** (less). On one 3.4.0 capture, 96
 **Speeds are already AzerothCore multipliers.** Every handler divides by the 2.5 and 7.0
 baselines before storing, so a text dump printing `RunSpeed: 8` becomes `1.142857` here - which
 is what `creature_template.speed_run` wants. Do not divide again.
+
+### `unit_flags` is a third runtime state
+
+`unit_flags` is the most unstable field in `creature_value` - 1.293 values per entry per sniff,
+against 1.024 for faction - because the server sets bits there as the world runs. In combat,
+stunned, fleeing, looting, skinnable, mounted: all true when the packet was sent, none of them a
+property of the entry. Across the corpus the raw field holds **1,127 distinct values**.
+
+`entry-values.sql` strips them before the vote, using WowPacketParser's own
+`UnitFlags.Disallowed` - the same list upstream strips before writing `creature_template`, so a
+row here and a row from the text dump agree. What is left is 5 bits and **21 distinct values**,
+and 375,000 rows collapse into their neighbours. `unit_flags2` goes 93 to 15 and `unit_flags3`
+53 to 37.
+
+`creature_value` keeps the raw value. `entry-values.sql` is the answer, `creature_value` is the
+evidence, and one of the runtime bits it preserves - `PlayerControlled` - is what
+`entry-auras.sql` uses to recognise a pet.
 
 `creature_spawn` no longer carries `faction`, `level`, `unit_flags`, `emote_state`,
 `stand_state` or `sheathe_state`. Those were never the spawn's values in the first place: the
@@ -99,6 +116,55 @@ on create. Absence is not zero.
 stored object, so an aura that changes speed mid-sniff does not appear here. That is the right
 value for `creature_template.speed_run` - the base before buffs - but it is not every speed the
 creature had.
+
+### Most of `creature_aura` is the sniffer's own debuffs
+
+Of the 335,607 entry-and-spell pairs in the corpus, **7.4% are a creature's own**. The
+widest-spread auras on creatures are Winter's Chill on 2,420 entries, Frost Fever on 2,235,
+Corruption on 1,989: one warlock's damage over time, following them from mob to mob for a whole
+capture. Anything reading the table raw as "auras this creature has" is reading a combat log.
+
+`entry-auras.sql` sorts them into `spell_aura` (what a spell is, corpus-wide) and `entry_aura`
+(what an entry carries), on four signals. None of the four is sufficient alone, and each one is
+there because it catches something the others miss:
+
+| signal | catches | misses |
+|---|---|---|
+| never carried a duration | ordinary DoTs and buffs | Savage Combat, permanent on all 39,308 sightings |
+| the packet named the caster | Savage Combat, Shadow Embrace, Blood Frenzy | only trustworthy on WotLK and TBC (below) |
+| `SpellFamilyName` is a class, consumable or pet talent | anything on a branch with no caster | creature abilities are family 0, so it says nothing about them |
+| `UNIT_FLAG_PLAYER_CONTROLLED` on the entry | pet scaling auras, which pass all three others | nothing else; it is an entry-level fact |
+
+A spell judged on trusted evidence anywhere in the corpus is judged everywhere, which is what
+lets the caster signal reach branches that cannot supply it.
+
+**The caster column is only trustworthy on WotLK and TBC, and collector version 1 did not say
+so.** Eleven call sites across nine version modules read the aura's caster into the protobuf
+entry and never onto the `Aura` object, so `CasterGuid` was null on every branch but TBC - and
+the collector read null as "no caster was sent, therefore the creature cast it". Cata, MoP,
+Retail and Classic came out **100.0% self-cast**. Where the caster does survive the column is
+excellent: across 58,147 WotLK sightings of eight known player DoTs, not one is marked
+self-cast. Collector version 2 assigns `CasterGuid` in those modules and records **2 for "the
+packet did not say"**, so the failure can no longer hide as an answer; `entry-auras.sql` trusts
+version 2 on any branch and version 1 only on WotLK and TBC.
+
+| `entry_aura.verdict` | pairs | |
+|---|---:|---|
+| `player` | 260,693 | someone else cast it |
+| `pet` | 27,831 | the entry is a summon, whatever it is carrying |
+| `combat` | 19,346 | its own, but seen with a duration, so it cast it during a fight |
+| **`addon`** | **24,666** | **its own and never timed - the creature_addon candidates** |
+| `unknown` | 3,071 | no trusted sniff ever saw it |
+
+**`addon` is the only one of the five worth publishing**, and 23,313 of its 24,666 rows have a
+WotLK or TBC sniff behind them. The list it produces reads like `creature_template_addon` should:
+a Wild Flower with a grow visual, a Pyrite Safety Container with a parachute, a Living Poison
+with Invisibility and Stealth Detection, a Glacier Penguin with Creature Random Size.
+
+Twenty known player spells - Corruption, Immolate, Shadow Word: Pain, Frost Fever, Winter's
+Chill, Sunder Armor and the rest - cover 28,158 entry pairs between them. All 28,158 come out
+`player` or `pet`, and **none reaches `addon`**. That is the test worth re-running after any
+change to the four signals.
 
 ### `creature_spell_cast` and `creature_aura` are not the same table
 
@@ -151,6 +217,8 @@ Re-running the script drops and recreates these, so losing them costs only time.
 | `wp_point`, `wp_node`, `wp_edge`, `wp_edge_raw`, `wp_level`, `wp_stack`, `wp_zobs` | `mine-paths.sql` | ~1 h 35 m |
 | `path_summary`, `path_point` | `mine-paths.sh` (via `chain-paths.py`) | 11 s once the graph exists |
 | `dg_spawn`, `dg_est`, `dg_approx`, `dg_fixed`, `dg_inst_rad`, `dg_rad_key`, `dg_route_pt` | `build-digest.sql` | ~4 h |
+| `entry_value`, `entry_value_best`, `spell_initial_gap`, `spell_initial_timer`, `waypoint_segment_speed`, `entry_travel_mode` | `entry-values.sql` | minutes |
+| `aura_trusted_sniff`, `entry_controlled`, `spell_aura`, `entry_aura` | `entry-auras.sql` | ~7 min |
 | `st_gap`, `st_timer` | `spell-timers.sql` | minutes |
 
 ## 3. Orphans — no script creates them

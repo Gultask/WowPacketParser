@@ -135,7 +135,18 @@ raw), `spell_target`, `spell_destination`, `creature_equip`, `creature_aura`, `g
 `creature_aggro`.
 
 Run `entry-values.sql` afterwards to roll the per-guid values up to the entry - `entry_value`,
-`entry_value_best` - and to derive initial cast timers from the pulls.
+`entry_value_best` - and to derive initial cast timers from the pulls. It also strips the runtime
+bits out of `unit_flags` on the way through; see `TABLES.md`.
+
+Then `entry-auras.sql`, which is what makes `creature_aura` usable. Read raw the table is a
+combat log: only 7.4% of its entry-and-spell pairs are the creature's own aura, and the
+widest-spread of them are one warlock's DoTs following them across 1,989 entries. The script
+sorts them and only the `addon` verdict is publishable.
+
+```
+mysql -u root -p wpp_ingest2 < entry-values.sql
+mysql -u root -p wpp_ingest2 < entry-auras.sql
+```
 
 **A trap worth knowing about.** Most of those last six read from `Storage` bags that the parser
 switches off unless their `SQLOutput` flag is set - `StoreBag.Add` is a no-op when disabled - and

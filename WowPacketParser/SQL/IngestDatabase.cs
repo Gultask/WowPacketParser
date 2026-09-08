@@ -990,15 +990,15 @@ CREATE TABLE IF NOT EXISTS `creature_aura` (
   `entry`           INT UNSIGNED    NOT NULL,
   `map`             INT UNSIGNED    NOT NULL,
   `spell_id`        INT UNSIGNED    NOT NULL,
-  `self_cast`       TINYINT(1)      NOT NULL,
-  `on_create`       TINYINT(1)      NOT NULL COMMENT 'already present in the block that created the creature',
+  `self_cast`       TINYINT          NOT NULL COMMENT '0 another unit cast it, 1 the creature itself, 2 the packet did not say',
+  `on_create`       TINYINT(1)      NOT NULL COMMENT 'was in the first aura update seen for this guid, which is usually but not always the spawn',
   `observations`    INT             NOT NULL,
-  `max_duration_ms` INT             NULL COMMENT 'null or negative means permanent',
+  `max_duration_ms` INT             NULL COMMENT 'longest total duration seen; null means the aura never carried one, so it is permanent',
   PRIMARY KEY (`sniff_id`, `guid`, `spell_id`),
   KEY `ix_caura_entry` (`entry`, `spell_id`),
   CONSTRAINT `fk_caura_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-  COMMENT='Auras seen on creatures. on_create with a permanent duration is what a spawn is meant to start with; anything else may be a player acting on it.';";
+  COMMENT='Auras seen on creatures, most of which a player put there. A permanent aura the creature cast on itself is creature_addon material; everything else is a fight in progress. scripts/curate.sql sorts them, and needs self_cast = 2 to stay honest - collector version 1 wrote 1 when it meant 2.';";
 
         private const string GossipMenuTableDdl = @"
 CREATE TABLE IF NOT EXISTS `gossip_menu` (
@@ -1241,6 +1241,9 @@ CREATE TABLE IF NOT EXISTS `areatrigger_teleport` (
 
         private const string CreatureAuraColumns =
             "guid, entry, map, spell_id, self_cast, on_create, observations, max_duration_ms";
+        // self_cast is the Caster byte, not a bool: 2 means the packet carried no caster
+        // information at all, which is not the same claim as "the creature cast it".
+
 
         public static int SaveCreatureAuras(ulong sniffId, IReadOnlyList<CreatureAuraRecord> auras)
         {
@@ -1249,8 +1252,8 @@ CREATE TABLE IF NOT EXISTS `areatrigger_teleport` (
             {
                 rows.Add(new object[]
                 {
-                    a.Guid, a.Entry, a.Map, a.SpellId, a.SelfCast ? 1 : 0, a.OnCreate ? 1 : 0,
-                    a.Observations, a.MaxDurationMs
+                    a.Guid, a.Entry, a.Map, a.SpellId, a.Caster, a.OnCreate ? 1 : 0,
+                    a.Observations, a.DurationMs
                 });
             }
 

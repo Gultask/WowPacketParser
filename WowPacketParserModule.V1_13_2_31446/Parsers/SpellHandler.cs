@@ -232,7 +232,7 @@ namespace WowPacketParserModule.V1_13_2_31446.Parsers
                         V8_0_1_27101.Parsers.SpellHandler.ReadContentTuningParams(packet, i, "ContentTuning");
 
                     if (hasCastUnit)
-                        auraEntry.CasterUnit = packet.ReadPackedGuid128("CastUnit", i);
+                        auraEntry.CasterUnit = aura.CasterGuid = packet.ReadPackedGuid128("CastUnit", i);
 
                     aura.Duration = hasDuration ? packet.ReadInt32("Duration", i) : 0;
                     aura.MaxDuration = hasRemaining ? packet.ReadInt32("Remaining", i) : 0;
