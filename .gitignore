@@ -34,3 +34,4 @@ cov-int
 scripts/.pipeline.log
 scripts/.run-pipeline.sh
 scripts/.paths/
+scripts/.run-digest.sh
