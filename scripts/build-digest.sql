@@ -401,6 +401,52 @@ ALTER TABLE dg_spawn ADD COLUMN radius_unmeasured TINYINT UNSIGNED NOT NULL DEFA
 UPDATE dg_spawn SET radius_unmeasured = 1, radius = 0 WHERE radius > 50;
 
 -- ---------------------------------------------------------------------------------------
+-- Phase 4b2: how much walking each route does per yard of ground it covers.
+--
+-- RECURRENCE PROVES AUTHORSHIP ONLY WHERE THE WANDER SPACE IS BIG ENOUGH. mine-paths.sql opens
+-- by arguing that random movement never picks the same destination twice, so an ordered pair
+-- walked twice is authored. That holds in the open. It does not hold in a ten yard box, where
+-- the reachable destinations are few enough that pairs repeat by chance, and nothing upstream
+-- checks the precondition.
+--
+-- Rat (4075) is the specimen and it long predates route promotion - every edge of it is at
+-- edge_obs 2, earned under the original rule, and published all along. One of its routes holds
+-- 45 points inside a box ten yards by thirteen at -8800, 645 in Stormwind, walking 101 yards to
+-- get nowhere, returning to the same corner at seq 15, 17, 24, 29, 31, 33 and 44.
+--
+-- Walked length over straight-line span is what catches it, and the geometry hands over the
+-- landmark: a perfect circular patrol sits at pi, 3.14. Eight is two and a half times that, so
+-- no real loop reaches it.
+--
+--   Locheed, Deserter Agitator   1.0     Stormwind City Patroller   ~3
+--   Malcolm Moore                1.15    Rat, Spider, Amani Crocolisk  10-18
+--
+-- Waypoint SPACING was the obvious instrument and it does not work: Skittering Scarab averages
+-- 19.3 yards between points and Malcolm Moore 10.2, so a spacing cut deletes the real route and
+-- keeps the scribble. Designers do not place waypoints at a consistent distance.
+--
+-- 649 routes across 62 entries fall to this, and 5 spawns stop being called patrollers. The 4x
+-- to 8x band is left alone on purpose - 1,826 routes across 318 entries, and a genuinely
+-- convoluted circuit through streets or corridors lives in there.
+-- ---------------------------------------------------------------------------------------
+DROP TABLE IF EXISTS dg_path_span;
+CREATE TABLE dg_path_span (
+  path_id    INT UNSIGNED NOT NULL PRIMARY KEY,
+  span       FLOAT NOT NULL COMMENT 'diagonal of the bounding box',
+  tortuosity FLOAT NULL COMMENT 'length_yd over span; NULL when the route stands still'
+) ENGINE=InnoDB
+SELECT pp.path_id,
+       SQRT(POW(MAX(pp.x)-MIN(pp.x),2) + POW(MAX(pp.y)-MIN(pp.y),2)) AS span,
+       ps.length_yd
+         / NULLIF(SQRT(POW(MAX(pp.x)-MIN(pp.x),2) + POW(MAX(pp.y)-MIN(pp.y),2)), 0) AS tortuosity
+FROM path_point pp
+JOIN path_summary ps ON ps.path_id = pp.path_id
+GROUP BY pp.path_id, ps.length_yd;
+
+SELECT NOW() AS t, 'phase 4b2: route shape' AS step,
+       COUNT(*) AS routes, SUM(tortuosity >= 8) AS scribbles FROM dg_path_span;
+
+-- ---------------------------------------------------------------------------------------
 -- Phase 4c: patrol detection.
 --
 -- `radius` is the spread of where a creature was seen. For a WANDERER that is the wander
@@ -423,8 +469,10 @@ DROP TABLE IF EXISTS dg_route_pt;
 CREATE TABLE dg_route_pt (entry INT UNSIGNED, map INT UNSIGNED, x FLOAT, y FLOAT, z FLOAT,
   KEY ix (entry, map, x, y)) ENGINE=InnoDB
 SELECT pp.entry, pp.map, pp.x, pp.y, pp.z
-FROM path_point pp JOIN path_summary ps ON ps.path_id = pp.path_id
-WHERE ps.n_points >= 4 AND ps.max_edge_obs > 1;
+FROM path_point pp
+JOIN path_summary ps ON ps.path_id = pp.path_id
+JOIN dg_path_span sp ON sp.path_id = ps.path_id
+WHERE ps.n_points >= 4 AND ps.max_edge_obs > 1 AND sp.tortuosity < 8;
 
 ALTER TABLE dg_spawn ADD COLUMN path_dist FLOAT NOT NULL DEFAULT -1,
                      ADD COLUMN patrols TINYINT NOT NULL DEFAULT 0;
@@ -625,12 +673,14 @@ CREATE TABLE acore_world.sniff_creature_path (
 INSERT INTO acore_world.sniff_creature_path
   (path_id, entry, map, seq, x, y, z, edge_sniffs, edge_obs, close_seq, covered_by)
 SELECT pp.path_id, pp.entry, pp.map, pp.seq, pp.x, pp.y, pp.z, pp.edge_sniffs, pp.edge_obs,
-       ps.close_seq, IFNULL(cov.path_id, 0)
+       ps.close_seq, IFNULL(csp.path_id, 0)
 FROM path_point pp
 JOIN path_summary ps ON ps.path_id = pp.path_id
+JOIN dg_path_span sp ON sp.path_id = ps.path_id
 LEFT JOIN path_summary cov ON cov.path_id = ps.covered_by
                           AND cov.n_points >= 3 AND cov.max_edge_obs > 1
-WHERE ps.n_points >= 3 AND ps.max_edge_obs > 1;
+LEFT JOIN dg_path_span csp ON csp.path_id = cov.path_id AND csp.tortuosity < 8
+WHERE ps.n_points >= 3 AND ps.max_edge_obs > 1 AND sp.tortuosity < 8;
 
 SELECT NOW() AS t, COUNT(DISTINCT path_id) AS published_paths, COUNT(*) AS published_points
 FROM acore_world.sniff_creature_path;

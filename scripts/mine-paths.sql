@@ -93,12 +93,32 @@ SELECT sniff_id, guid, entry, map, segment_id, point_index,
        position_x, position_y, position_z, creation_spline,
        (creation_spline = 1 AND (spline_flags & 0x400) > 0 AND segment_points > 1) AS air_path,
        seen_utc
-FROM creature_waypoint
+FROM creature_waypoint w
 WHERE position_x BETWEEN -17000 AND 17000
   AND position_y BETWEEN -17000 AND 17000
   AND position_z BETWEEN -2000 AND 4400
   AND (point_index = segment_points - 1
-       OR (creation_spline = 1 AND (spline_flags & 0x400) > 0));
+       OR (creation_spline = 1 AND (spline_flags & 0x400) > 0))
+  -- OWNED CREATURES ARE NOT WORLD CONTENT, and the collector that wrote this table did not know
+  -- it. IsTemporarySpawn - SummonedBy, CreatedBy, CreatedBySpell, DemonCreator, four update
+  -- fields the server sent - gates CollectCreatureSpawns and the gameobject collector and was
+  -- never called by CollectCreatureWaypoints. That is fixed in the parser, but only for sniffs
+  -- ingested after it, so this stands in for it on the corpus that exists.
+  --
+  -- An entry with no creature_spawn row ANYWHERE was refused by that gate every single time it
+  -- was seen, which makes this the same rule read back out of its own output. Entry level and
+  -- not guid level on purpose: creature_spawn also drops corpses, so a guid-level test would
+  -- take the legitimate movement of any creature the sniffer only ever saw dead.
+  --
+  -- 4,279,860 rows go, 8.5% of the table, across 1,630 entries and 340,521 guids: Snake Trap
+  -- snakes, shaman totems, mage mirror images, Army of the Dead ghouls, warlock pets, Wild
+  -- Flower, herbalism spawns and Dark Portal beam stalkers. A pet follows its player, so its
+  -- route is the PLAYER route, and it clears every geometric test a real one-way route clears
+  -- because the player covers ground.
+  --
+  -- This loses the summons that genuinely do have an authored path. They are event content and
+  -- the sniff can be read directly for those; the corpus is here for the overworld spawn.
+  AND EXISTS (SELECT 1 FROM creature_spawn s WHERE s.entry = w.entry);
 
 SELECT NOW() AS t, COUNT(*) AS usable_points, SUM(air_path) AS kept_as_air_path FROM wp_point;
 SELECT NOW() AS t,
