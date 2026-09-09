@@ -19,7 +19,7 @@ the only tables that cannot be rebuilt without re-reading the sniffs, which take
 | `map_validity` | target × map | which branches' terrain matches 3.3.5, and what rebuilt the rest |
 | `creature_spawn` | sniff × creature | position, level, faction, flags. Dead creatures excluded. |
 | `gameobject_spawn` | sniff × gameobject | position and rotation quaternion |
-| `creature_waypoint` | move order point | the big one — destinations, not pathfinding filler |
+| `creature_waypoint` | move order point | the big one — destinations, not pathfinding filler. **No summon gate**; see below |
 | `creature_movement` | sniff × creature | movement reduced to a centre and a radius |
 | `loot_instance` / `loot_instance_item` | loot opened | empty loots kept on purpose: they are the denominator |
 | `creature_spell_cast` | SMSG_SPELL_START | raw; the gap between two is the cooldown observation |
@@ -215,6 +215,43 @@ the two tables is what tells them apart, which is exactly why both are kept.
 The cast table also holds 4,642 raw events behind those 2,086 distinct pairs. That surplus is
 the timing - the gaps a cooldown is read from - and the aura table cannot supply it at all.
 
+### `creature_waypoint` never learned about summons
+
+`IsTemporarySpawn()` - pets, guardians, totems, anything with `CreatedBySpell` - gates
+`CollectCreatureSpawns` and the gameobject collector. `CollectCreatureWaypoints` does not call
+it, so a creature the pipeline has already decided is not world content still contributes every
+move order it made:
+
+| entry | `creature_spawn` | `creature_waypoint` |
+|---|---:|---:|
+| Army of the Dead Ghoul (24207) | 0 | 291,967 |
+| Sprite Darter Hatchling (9662) | 0 | 126,235 |
+| Bloodworm (28017) | 0 | 76,971 |
+
+It stayed invisible while mining was per point, because a pet following a player never walks the
+same centimetre twice and nothing it did survived the recurrence test. Phase 4 of
+`mine-paths.sql` leans on whole walks, and these surfaced immediately - they clear its
+`radius_robust >= points` condition **better than a real one-way route does**, because the pet
+goes wherever the player goes and the player covers ground.
+
+They are refused today by phase 4 needing a confirmed *run* as well, and by the anchor rule at
+publish. Both are statistical answers to something the pipeline has a categorical rule for. The
+fix is the missing call in the waypoint collector, and it needs a re-ingest.
+
+### The same guid can be two creatures
+
+Wood Frog (7550) guid `0016ABED` in sniff 553 holds 592 points spanning x −2868 to 1684 and y
+−4458 to 8517 - the width of Kalimdor - on one map, one entry, inside 44 minutes. A frog did not
+do that. The server recycled the low guid across despawns as the capture moved, and the parser
+keys movement by guid alone, so unrelated creatures merge into one walk.
+
+The visible damage is `creature_movement.radius_robust`, which came out at 9,494 yards for that
+frog and carried a pure wander walk through phase 4 into a 1,043 point published route. The
+anchor rule catches that particular one. The merge itself is not fixed, and `radius_robust` is
+used elsewhere - `build-digest.sql` phase 1b falls back to it for instances with no waypoints.
+Phase 4b's `radius > 50` ceiling means the digest already refuses the worst of them for spawn
+radii, so this shows up as a route problem rather than a `wander_distance` one.
+
 ### Initial timers need `creature_aggro`
 
 The gap between two casts of a spell is the repeat timer. The gap from the *pull* to the first
@@ -292,7 +329,7 @@ Re-running the script drops and recreates these, so losing them costs only time.
 
 | tables | built by | cost |
 |---|---|---|
-| `wp_point`, `wp_node`, `wp_edge`, `wp_edge_raw`, `wp_level`, `wp_stack`, `wp_zobs` | `mine-paths.sql` | ~1 h 35 m |
+| `wp_point`, `wp_node`, `wp_edge`, `wp_edge_raw`, `wp_level`, `wp_stack`, `wp_zobs`, `wp_step_ok`, `wp_walk`, `wp_walk_xy`, `wp_edge_walk` | `mine-paths.sql` | ~2 h |
 | `path_summary`, `path_point` | `mine-paths.sh` (via `chain-paths.py`) | 11 s once the graph exists |
 | `dg_spawn`, `dg_est`, `dg_approx`, `dg_fixed`, `dg_inst_rad`, `dg_rad_key`, `dg_route_pt`, `dg_state` | `build-digest.sql` | ~4 h |
 | `co2_recovered`, `co2_recovered_build` | `recover-co2.sql` | ~1 min. **Additive, not dropped** - they are the record of which rows it changed, and deleting them loses the ability to undo it. |

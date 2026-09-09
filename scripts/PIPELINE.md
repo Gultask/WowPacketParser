@@ -360,13 +360,108 @@ including specimens quoted in these docs. Key on coordinates.
 **26.7% of published points now carry `edge_sniffs = 1`.** That is the quarter of the corpus
 this change added, and filtering it back out reproduces the old dataset almost exactly.
 
-**What it does not reach.** A route walked once *per creature* still cannot be confirmed, because
-nothing about it recurs. Deserter Agitator (23602) is the specimen: 6 captures, 55 guids, 260
-points, and its longest traces hold 22 distinct positions in 22 points - one pass each, no lap.
-It recovered from 15 nodes to 36, but 30 of those 36 came from two different Agitators standing
-on the same centimetre rather than from anyone doing a second lap, and 144 of its 180 positions
-were walked exactly once ever. Cross-creature byte-matching is the only evidence such an entry
-can produce, and it is thin by construction.
+#### Phase 4: a proven walk vouches for the rest of itself
+
+The paragraph that used to sit here said a route walked once per creature could not be reached at
+all. That was true per point and it is what phase 4 exists to fix.
+
+A walk is one `(sniff_id, guid)`. Phases 1 and 3 ask of every position and every step, in
+isolation, whether it was seen twice - the right question for a creature picking destinations at
+random and the wrong one for a creature running a script. A scripted walk is one object: if two
+of its steps are byte-identical to another capture, the creature is on an authored path, and the
+part only one person stayed to watch is the rest of that same path.
+
+Malcolm Moore (27891) is the specimen. Seven captures, 40 distinct positions, **33 seen exactly
+once and all 33 exclusive to the single capture that followed him the whole way** - the other six
+turn back between points 2 and 7. He published 5 points of a 39 point walk; he now publishes 40.
+
+Promotion also repairs a defect the per-point rule had on its own. Phase 2 ran its `LEAD` over
+every point and only then joined both ends to `wp_node`, so a point that failed the test did not
+merely vanish, it **severed the step spanning it**. Malcolm again: his `1623.53 -> 1630.20` step
+was confirmed by one capture only, because the other capture that walked it recorded an
+intermediate destination at `1628.01, 806.94` nobody else ever saw, and that traversal became two
+dead steps instead of the second observation. Promotion fixes it the right way round - the
+intermediate point is kept, not jumped over. Bridging the two ends would have invented a leg,
+since phase 0 already reduced every move order to its destination.
+
+**Two admission conditions, and each covers the other's blind spot.** Neither is a safety margin.
+With only the first, this phase turned 607,873 edges into 8,405,393, of which 93% were admitted
+on a walk rather than earned.
+
+1. **The confirmed steps must meet.** `a.to_key = b.from_key` in the same walk is three
+   consecutive positions matching another capture, not two scattered ones. Coincidences are
+   independent events and a long walk collects them; requiring adjacency squares the
+   improbability and is indifferent to how long anyone watched.
+2. **The walk must have gone somewhere** - `radius_robust >= points`, at least a yard of spread
+   per move order issued. Below that the creature is issuing more orders than it has ground to
+   show for them, which is only possible by re-treading.
+
+Spider (14881) is why the second exists: one capture of one spider holds **4,789 move orders over
+2h41m inside a 5.3 yard radius**. Eighteen of its 4,788 steps match another capture, and they are
+not flukes either - 85% of that entry's confirmed edges have two or more independent captures
+behind them - but eighteen coincidences inside a five yard circle say nothing about the other
+4,770 steps.
+
+The first exists because the second only bites on a creature somebody watched for a *long* time:
+`radius_robust` saturates at the wander radius while `points` keeps growing, so a wanderer caught
+in a short window has few orders and a wide radius and sails through. Army of the Dead Ghoul,
+Bloodworm and Sprite Darter Hatchling clear it outright and score **higher on it than Malcolm
+does**, because a pet follows the player and the player covers ground.
+
+| | walks | points | avg orders | avg radius |
+|---|---:|---:|---:|---:|
+| run + went somewhere | 193,360 | 3,033,622 | 16 | 63.8 |
+| run + retreads | 84,898 | 13,060,055 | 154 | 26.9 |
+| scattered + retreads | 5,796 | 1,189,303 | 205 | 17.9 |
+| scattered + went somewhere | 4,676 | 72,963 | 16 | 60.4 |
+
+Promoted steps carry `n_obs = 1`, which the phase 3 rule made impossible, so it is a free
+provenance marker that travels all the way to the published `edge_obs`. `chain-paths.py` already
+sorts on `n_sniffs` then `n_obs`, so it prefers earned steps and only reaches for these when
+nothing better connects.
+
+**A published route must be anchored.** `max_edge_obs = 1` means the chainer assembled a route
+entirely out of promoted steps, none of which was ever confirmed on its own - and the anchor is
+the whole justification for promoting them. That is a consistency requirement, not another
+threshold, and `build-digest.sql` phase 6 enforces it. It is not academic: Wood Frog (7550)
+published a **1,043 point route running 5,295 yards**, every edge at obs 1, because a guid was
+reused across Kalimdor inside one capture and the merged walk inherited a 9,494 yard radius that
+carried it through condition 2.
+
+| | routes | points | longest |
+|---|---:|---:|---:|
+| entirely promoted, no anchor - dropped | 19,834 | 134,788 | 1,043 |
+| anchored, extended by promotion - kept | 26,272 | 256,990 | 488 |
+| every edge earned - kept | 67,478 | 410,143 | 1,780 |
+
+Only 12 entries lose every route they have to the anchor rule.
+
+**Still open: `creature_waypoint` has no summon gate.** `IsTemporarySpawn()` is called by the
+spawn collector and the gameobject collector, and never by `CollectCreatureWaypoints`. Army of
+the Dead Ghoul has 0 rows in `creature_spawn` and 291,967 in `creature_waypoint`; Sprite Darter
+Hatchling 0 and 126,235; Bloodworm 0 and 76,971. The pipeline has a categorical rule for these
+and simply does not apply it here, which is why they had to be refused statistically instead. The
+parser fix is one call and needs a re-ingest.
+
+#### Three points is a route
+
+`build-digest.sql` published from four points up, which deleted 38,844 of 84,226 mined routes -
+46% - across 3,787 entries, **787 of which were left with nothing at all**. The four point floor
+is right where it came from, phase 4c, because there it answers a yes/no question and a three
+point chain is one turn. It does not transfer to the route table, which publishes the route
+beside the evidence for it.
+
+26,467 of the deleted routes had *every* edge confirmed by two or more independent captures, and
+5,197 by three or more, the latter averaging 48.9 yards. Random movement does not produce the
+same ordered pair in three separate captures.
+
+Deserter Agitator (23602) and Locheed (9876) are the specimens, and both were **complete** routes
+rather than truncated ones. Seven captures of one agitator spawn, spanning 2023-06 to 2026-08
+across TBC and WotLK builds, record the same three positions with the same `move_time_ms` - 3082,
+3300, 4400 - and sniff 3005 catches the facing packet 14 seconds after he reaches the last point.
+He arrives, turns, despawns. Locheed is the same shape: `move_time_ms` 4464 on his first leg in
+all twelve captures that saw it. `MIN_POINTS` in `chain-paths.py` was already 3, so the chainer
+was building these and the publish step was throwing every one of them away.
 
 **Chaining alone is 11 seconds.** `wp_node` and `wp_edge` are what cost the 95 minutes, and
 `chain-paths.py` only reads their exports, so a change to how routes are assembled - closure

@@ -414,13 +414,17 @@ UPDATE dg_spawn SET radius_unmeasured = 1, radius = 0 WHERE radius > 50;
 --
 -- The measurement backs it up: points sitting on a route average 24.2 yards of "radius",
 -- points with no route at all average 7.5.
+--
+-- The floor stays at 4 HERE and only here. Phase 6 publishes routes from 3 points up, because
+-- there the route travels with its own evidence and the reader can weigh it. This is a yes/no
+-- classification with nothing attached, so it keeps the conservative threshold.
 -- ---------------------------------------------------------------------------------------
 DROP TABLE IF EXISTS dg_route_pt;
 CREATE TABLE dg_route_pt (entry INT UNSIGNED, map INT UNSIGNED, x FLOAT, y FLOAT, z FLOAT,
   KEY ix (entry, map, x, y)) ENGINE=InnoDB
 SELECT pp.entry, pp.map, pp.x, pp.y, pp.z
 FROM path_point pp JOIN path_summary ps ON ps.path_id = pp.path_id
-WHERE ps.n_points >= 4;
+WHERE ps.n_points >= 4 AND ps.max_edge_obs > 1;
 
 ALTER TABLE dg_spawn ADD COLUMN path_dist FLOAT NOT NULL DEFAULT -1,
                      ADD COLUMN patrols TINYINT NOT NULL DEFAULT 0;
@@ -508,10 +512,10 @@ LEFT JOIN (SELECT entry FROM creature_value
            HAVING MIN((CAST(value AS UNSIGNED) & 0x02000000) > 0) = 1) tr ON tr.entry = d.entry;
 
 -- ---------------------------------------------------------------------------------------
--- Phase 6: publish the routes. Same filter phase 4c uses to call a spawn a patroller - a
--- three point chain is one turn, and random movement throws off plenty of those by chance.
--- Rebuilt by mine-paths.sh; this only copies it across, so re-run that first if the routes
--- themselves are stale.
+-- Phase 6: publish the routes. NOT the same filter phase 4c uses - that one wants four points
+-- to call a spawn a patroller and this one publishes from three, for the reason set out below.
+-- Both require an anchor. Rebuilt by mine-paths.sh; this only copies it across, so re-run that
+-- first if the routes themselves are stale.
 -- ---------------------------------------------------------------------------------------
 SELECT NOW() AS t, 'phase 6: publish routes' AS step;
 
@@ -536,7 +540,14 @@ CREATE TABLE acore_world.sniff_creature_path (
   -- capture to wait for. `edge_obs` is what says whether that one person saw it twice or forty
   -- times. Filtering on `edge_sniffs` alone throws away every route a single player captured
   -- completely; the earlier corpus did exactly that and lost 929,752 already-proven nodes.
-  edge_obs    INT UNSIGNED NOT NULL COMMENT 'total traversals of that edge; with edge_sniffs = 1 this is one capture watching that many laps',
+  --
+  -- edge_obs = 1 is its own case and could not happen before: the step was admitted because its
+  -- WALK was proven, not because the step itself recurred. Phase 4 of mine-paths.sql promotes
+  -- the rest of a walk once two of its steps match another capture, which is what a one-way
+  -- scripted route needs - Malcolm Moore (27891) walks his 39 points once per pull and only one
+  -- capture ever followed him past point 7. Weakest evidence in the table; the chainer sorts it
+  -- last and only reaches for it when nothing better connects.
+  edge_obs    INT UNSIGNED NOT NULL COMMENT 'total traversals of that edge; with edge_sniffs = 1 this is one capture watching that many laps; 1 means the step was admitted on its walk',
   -- The seq the last point leads back to, or -1 for a route that never returns to itself. 0 is
   -- a plain ring. Anything higher is a route that walks in and then circles, so the approach is
   -- real and the loop starts part way along.
@@ -565,20 +576,61 @@ CREATE TABLE acore_world.sniff_creature_path (
   KEY ix_pos (map, x, y)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- THREE POINTS IS A ROUTE. It used to take four here, and that deleted 38,844 of the 84,226
+-- routes the chainer built - 46% of them - across 3,787 entries, 787 of which were left with
+-- nothing published at all.
+--
+-- The four point floor is right where it came from, phase 4c above, because there it answers a
+-- yes/no question - does this spawn patrol - and a three point chain is one turn, which random
+-- movement throws off often enough to matter. It does not transfer here. This table publishes
+-- the route itself beside the evidence for it, and the reader decides.
+--
+-- What was being deleted was not weak. 26,467 of those routes had EVERY edge confirmed by two
+-- or more independent captures and 5,197 by three or more, the latter averaging 48.9 yards.
+-- Random movement does not produce the same ordered pair in three separate captures.
+--
+-- Deserter Agitator (23602) and Locheed (9876) are the specimens, and both are complete routes
+-- rather than truncated ones. Seven captures of one agitator spawn, spanning 2023-06 to 2026-08
+-- across TBC and WotLK builds, record the same three positions with the same move_time_ms -
+-- 3082, 3300, 4400 - and one of them catches the facing packet 14 seconds after he reaches the
+-- last point. He arrives, turns, despawns. The route is three points long. Locheed is the same
+-- shape: move_time_ms 4464 on his first leg in all twelve captures that saw it.
+--
+-- MIN_POINTS in chain-paths.py is 3, so the chainer was building these and this step was
+-- throwing every one of them away. The two floors now agree.
+--
+--
+-- AND EVERY PUBLISHED ROUTE MUST BE ANCHORED. `max_edge_obs = 1` means the chainer assembled
+-- this route entirely out of steps admitted by phase 4 of mine-paths.sql - steps that came along
+-- because their WALK proved itself, none of which was ever confirmed on its own. The anchor is
+-- the whole justification for promoting them, so a route holding none of it has no justification
+-- at all, and this is a consistency requirement rather than another threshold.
+--
+-- It is not academic. Wood Frog (7550) published a 1,043 point route running 5,295 yards, every
+-- edge at obs 1, because a guid was reused across Kalimdor inside one capture and the merged
+-- walk inherited a 9,494 yard radius that carried it through phase 4. Refugee Kid, Reanimated
+-- Corpse, Vekniss Wasp, Drakks and Treant are the same shape.
+--
+--   entirely promoted, no anchor    19,834 routes   134,788 points   longest 1,043
+--   anchored, extended by promotion 26,272 routes   256,990 points   longest   488
+--   every edge earned               67,478 routes   410,143 points
+--
+-- Only 12 entries lose every route they have to this, and Malcolm Moore is in the middle group -
+-- 40 points at 398.6 yards, opening edges confirmed by five captures and the tail carried by
+-- them, which is exactly what phase 4 was built to do.
+--
 -- The LEFT JOIN is what keeps covered_by pointing at something real: the chainer computes it
--- over every route it built, and this publish step drops the ones under four points. A reference
--- to a route nobody can look up is worse than no reference. It is not a formality: 20 rows land
--- there on the current corpus, because n_points is the chain length while coverage is judged on
--- DISTINCT nodes, so a three-point chain that stands on one node twice can still cover a
--- four-point route.
+-- over every route it built, and this publish step drops the ones under the floor. A reference
+-- to a route nobody can look up is worse than no reference.
 INSERT INTO acore_world.sniff_creature_path
   (path_id, entry, map, seq, x, y, z, edge_sniffs, edge_obs, close_seq, covered_by)
 SELECT pp.path_id, pp.entry, pp.map, pp.seq, pp.x, pp.y, pp.z, pp.edge_sniffs, pp.edge_obs,
        ps.close_seq, IFNULL(cov.path_id, 0)
 FROM path_point pp
 JOIN path_summary ps ON ps.path_id = pp.path_id
-LEFT JOIN path_summary cov ON cov.path_id = ps.covered_by AND cov.n_points >= 4
-WHERE ps.n_points >= 4;
+LEFT JOIN path_summary cov ON cov.path_id = ps.covered_by
+                          AND cov.n_points >= 3 AND cov.max_edge_obs > 1
+WHERE ps.n_points >= 3 AND ps.max_edge_obs > 1;
 
 SELECT NOW() AS t, COUNT(DISTINCT path_id) AS published_paths, COUNT(*) AS published_points
 FROM acore_world.sniff_creature_path;
