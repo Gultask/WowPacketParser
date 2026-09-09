@@ -73,7 +73,7 @@
 
         public const int CreatureSpawnVersion = 3;   // 2 added emote/stand/sheathe state, 3 added health
         public const int GameObjectSpawnVersion = 2;   // 2 added the static rotation quaternion
-        public const int CreatureWaypointVersion = 2;   // 2 added segment point counts
+        public const int CreatureWaypointVersion = 3;   // 2 added segment point counts, 3 gates owned creatures
         public const int LootVersion = 1;
         public const int CreatureMovementVersion = 1;
         public const int CreatureSpellVersion = 1;

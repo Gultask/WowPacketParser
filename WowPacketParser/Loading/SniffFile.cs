@@ -2398,11 +2398,12 @@ namespace WowPacketParser.Loading
         /// <summary>
         /// Real waypoints for creatures that stayed out of combat.
         ///
-        /// Two things are deliberately thrown away rather than flagged. The packedPoints array is
-        /// delta compressed pathfinding filler, not server authored path, so it never becomes a
-        /// waypoint. And every segment belonging to a creature that aggroed anywhere in this
-        /// sniff is dropped, because chase and evade movement is not what the creature does when
-        /// left alone - which also removes almost all of the volume.
+        /// Three things are deliberately thrown away rather than flagged. The packedPoints array
+        /// is delta compressed pathfinding filler, not server authored path, so it never becomes
+        /// a waypoint. Every segment belonging to a creature that aggroed anywhere in this sniff
+        /// is dropped, because chase and evade movement is not what the creature does when left
+        /// alone - which also removes almost all of the volume. And an owned creature contributes
+        /// nothing at all, on the same IsTemporarySpawn test the spawn collector uses.
         /// </summary>
         private List<CreatureWaypointRecord> CollectCreatureWaypoints(ulong sniffId, Packets packets)
         {
@@ -2410,11 +2411,28 @@ namespace WowPacketParser.Loading
             if (packets == null)
                 return waypoints;
 
-            // Monster move packets carry no map, so take it from the object we saw move.
+            // Monster move packets carry no map, so take it from the object we saw move. Failing
+            // to find one here is what drops the creature, so this doubles as the owned-creature
+            // gate: IsTemporarySpawn is the same test CollectCreatureSpawns uses, and it was
+            // missing here. It reads four update fields the server sent - SummonedBy, CreatedBy,
+            // CreatedBySpell, DemonCreator - so it states ownership rather than guessing at it.
+            //
+            // Owned creatures move constantly and none of it is world content: a pet follows its
+            // player, so its route is the PLAYER's route. Army of the Dead Ghoul contributed
+            // 291,967 move orders to the corpus against 0 spawn rows, Sprite Darter Hatchling
+            // 126,235, Bloodworm 76,971. It stayed invisible while route mining was per position,
+            // because a creature following a player never walks the same centimetre twice and
+            // nothing it did survived the recurrence test. Mining whole walks surfaced all of it
+            // at once - and worse, a pet CLEARS the "did this walk go somewhere" test better than
+            // a real one-way route does, because the player covers ground.
+            //
+            // This does lose the summons that genuinely do have an authored path. They are event
+            // content and the sniff can be read directly for those; the corpus is here for the
+            // ordinary overworld spawn.
             var maps = new Dictionary<string, uint>();
             foreach (var pair in Storage.Objects)
             {
-                if (pair.Value.Item1.Type == ObjectType.Unit)
+                if (pair.Value.Item1.Type == ObjectType.Unit && !pair.Value.Item1.IsTemporarySpawn())
                     maps[GuidKey(pair.Key)] = pair.Value.Item1.Map;
             }
 
