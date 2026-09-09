@@ -79,6 +79,8 @@ CREATE TABLE st_timer (
   p90_ms      INT NOT NULL,
   max_gap_ms  INT NOT NULL COMMENT 'raw ceiling; contaminated by idle time, has no upper bound',
   branches    VARCHAR(64) NULL,
+  spread      FLOAT       NULL COMMENT 'p75 / p10; how far the gaps range',
+  shape       VARCHAR(12) NULL COMMENT 'fixed, conditional or sparse - see below',
   PRIMARY KEY (entry, spell_id)
 ) ENGINE=InnoDB;
 
@@ -94,7 +96,8 @@ SELECT entry, spell_id,
        MAX(CASE WHEN pct <= 0.75 THEN gap_ms END) AS p75_ms,
        MAX(CASE WHEN pct <= 0.90 THEN gap_ms END) AS p90_ms,
        MAX(gap_ms)                       AS max_gap_ms,
-       GROUP_CONCAT(DISTINCT branch ORDER BY branch) AS branches
+       GROUP_CONCAT(DISTINCT branch ORDER BY branch) AS branches,
+       NULL, NULL
 FROM (
     SELECT entry, spell_id, sniff_id, guid, gap_ms, branch,
            PERCENT_RANK() OVER (PARTITION BY entry, spell_id ORDER BY gap_ms) AS pct
@@ -113,6 +116,34 @@ SET p10_ms    = COALESCE(p10_ms, min_gap_ms),
     p90_ms    = COALESCE(p90_ms, max_gap_ms);
 
 -- ---------------------------------------------------------------------------
+-- 2b. Which spells the min/max model can actually describe.
+--
+-- AzerothCore casts a creature spell on a timer between min and max. That fits a spell whose
+-- only gate is its cooldown. It does not fit a conditional spell - an interrupt, a buff cast
+-- when something needs buffing, a positional or low-health attack - because the observed gap
+-- for those is however long the CONDITION took to occur, not the cooldown.
+--
+-- The two cannot be told apart from a median, but they can from the spread. A cooldown-gated
+-- spell repeats at nearly the same interval every time; a conditional one does not. So:
+--
+--   fixed        p75 within 3x of p10 - the pair describes the spell, publish both
+--   conditional  wider than that      - only the LOWER bound means anything. p10 is the
+--                                       floor the cooldown imposes; the upper quantiles are
+--                                       measuring the sniffer's fight, not the spell.
+--   sparse       too little evidence to say either way
+--
+-- For a conditional spell the initial timer matters more than the repeat, and that comes from
+-- spell_initial_timer in entry-values.sql, which measures aggro to first cast rather than cast
+-- to cast. Read the two together: initial timer for when it first fires, p10 for how soon it
+-- can possibly fire again.
+-- ---------------------------------------------------------------------------
+UPDATE st_timer
+SET spread = CASE WHEN p10_ms > 0 THEN p75_ms / p10_ms END,
+    shape  = CASE WHEN creatures < 2 OR observations < 8 THEN 'sparse'
+                  WHEN p10_ms > 0 AND p75_ms / p10_ms <= 3 THEN 'fixed'
+                  ELSE 'conditional' END;
+
+-- ---------------------------------------------------------------------------
 -- 3. What came out.
 -- ---------------------------------------------------------------------------
 
@@ -121,6 +152,11 @@ SELECT COUNT(*) AS timer_rows,
        SUM(observations) AS gaps,
        SUM(creatures >= 3 AND observations >= 20) AS well_evidenced
 FROM st_timer;
+
+SELECT shape, COUNT(*) AS rows_, COUNT(DISTINCT entry) AS entries,
+       ROUND(AVG(p10_ms)) AS avg_min_timer, ROUND(AVG(median_ms)) AS avg_median,
+       ROUND(AVG(spread), 1) AS avg_spread
+FROM st_timer GROUP BY shape ORDER BY rows_ DESC;
 
 -- The rows worth publishing first: several creatures, plenty of gaps, and a spread narrow
 -- enough that a min/max pair actually describes the spell.

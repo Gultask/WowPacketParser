@@ -1207,7 +1207,7 @@ namespace WowPacketParser.Loading
 
                 // Targets come off a completed cast only: an interrupted start never landed on
                 // anything, and its target list is what the caster meant rather than what it hit.
-                if (go != null)
+                if (go != null && TargetsByEntry(data.Spell))
                 {
                     foreach (var hit in go.HitTargets)
                     {
@@ -1805,6 +1805,62 @@ namespace WowPacketParser.Loading
         /// cast names the spell, so neither packet is a row on its own - the parser's own
         /// pairing window is reused here rather than reinvented.
         /// </summary>
+        private static readonly Dictionary<uint, bool> _targetsByEntry = new Dictionary<uint, bool>();
+
+        /// <summary>
+        /// Whether a spell targets anything by creature or gameobject entry, per Spell.dbc's
+        /// implicit target on any effect.
+        ///
+        /// spell_target exists to answer "which entry does this entry-targeted spell hit". For a
+        /// spell that targets whatever happens to be in front of the caster the question has no
+        /// answer, and the row records where the sniffer was questing rather than anything about
+        /// the spell. Measured over the 4,512-sniff corpus, 94.6% of the 2.05M rows this
+        /// collector wrote were of that kind.
+        ///
+        /// FAILS OPEN, deliberately. The repository ships no dbc folder, so SpellEffectStores is
+        /// normally empty - and an empty store makes every spell look like it targets nothing,
+        /// which would silently discard the entire table. With no DBC loaded this keeps
+        /// everything, exactly as before the gate existed, and scripts/roll-up-tables.sql applies
+        /// the same filter downstream from wotlkmangos.spell_template instead.
+        /// </summary>
+        private static bool TargetsByEntry(uint spellId)
+        {
+            if (DBC.DBC.SpellEffectStores.Count == 0)
+                return true;
+
+            lock (_targetsByEntry)
+            {
+                if (_targetsByEntry.TryGetValue(spellId, out var known))
+                    return known;
+            }
+
+            var byEntry = false;
+            // Spell.dbc carries three effects; later clients carry more, so walk until a gap.
+            for (uint i = 0; i < 32 && !byEntry; i++)
+            {
+                if (!DBC.DBC.SpellEffectStores.TryGetValue(Tuple.Create(spellId, i), out var effect))
+                    continue;
+
+                foreach (var target in effect.ImplicitTarget)
+                {
+                    // TARGET_UNIT_SRC_AREA_ENTRY, TARGET_UNIT_DEST_AREA_ENTRY,
+                    // TARGET_UNIT_NEARBY_ENTRY, TARGET_GAMEOBJECT_NEARBY_ENTRY,
+                    // TARGET_DEST_NEARBY_ENTRY, TARGET_UNIT_CONE_ENTRY. See Enums/SpellEnums.cs.
+                    if (target == 7 || target == 8 || target == 38 ||
+                        target == 40 || target == 46 || target == 60)
+                    {
+                        byEntry = true;
+                        break;
+                    }
+                }
+            }
+
+            lock (_targetsByEntry)
+                _targetsByEntry[spellId] = byEntry;
+
+            return byEntry;
+        }
+
         private List<NpcSpellClickRecord> CollectNpcSpellClicks(ulong sniffId)
         {
             var clicks = new List<NpcSpellClickRecord>();

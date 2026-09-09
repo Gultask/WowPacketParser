@@ -18,6 +18,9 @@ belongs in a script before the session ends, because a year from now nobody will
   recover-co2.sql          rebuilds create_type for silent clients          ~1 min
         |
         v
+  roll-up-tables.sql       the eleven tables that had no digest              ~1 min
+        |
+        v
   mine-paths.sh            creature_waypoint -> path_summary, path_point   ~1 h 35 m
         |
         v
@@ -207,6 +210,37 @@ nothing respawned in view, and most of them are WotLK, where capture works fine.
 
 Every changed row is listed in `co2_recovered` first, so it is reversible. The script's header
 carries the validation and the tolerance table.
+
+### 1c. Roll up the tables that had no digest
+
+```
+mysql -u root -p wpp_ingest2 < roll-up-tables.sql
+```
+
+Eleven parser-written tables were read by no script at all - collected on every ingest, 4.2M
+rows, about 860 MB, never turned into an answer. Most needed no inference, only the sniff
+dimension collapsed and the observations counted, so `roll-up-tables.sql` does that and keeps a
+`sniffs` column throughout: one capture seeing a thing ten times is far weaker evidence than ten
+captures seeing it once, and a bare `DISTINCT` throws exactly that away.
+
+Two of its outputs are gates rather than rollups, and both are argued in the script header:
+
+- **`entry_spell_target`** drops the 94.6% of `spell_target` whose spell has no entry-based
+  implicit target in Spell.dbc. 2,052,019 rows become 59,832. Spells absent from 3.3.5 Spell.dbc
+  are kept and marked `unknown_spell` rather than dropped - there are 1,401 of them, all Cata and
+  later, and this database cannot say what they target.
+- **`at_teleport`** gates on the pairing delay, not on collapsing each trigger to one
+  destination. The collector allows 30 s for a loading screen, which is long enough to catch the
+  player's next hearthstone; single-destination triggers average 3.9 s of delay and
+  multi-destination ones 16.6 s. After a 3 s gate, 116 of 125 triggers resolve to one
+  destination and **nine keep more than one** - those are real. A trigger can have a conditional
+  destination, so forcing one row per trigger would delete good data to tidy up an artefact.
+
+`creature_spell_cast` is the twelfth table with no published digest, but it already has a
+script - `spell-timers.sql`, step 3b - which had simply never been run against this corpus.
+
+`npc_spellclick` has no rollup, deliberately: the source table is empty and always has been.
+See `TABLES.md`.
 
 ### 2. Mine the routes
 
@@ -405,6 +439,14 @@ Turns raw `creature_spell_cast` rows into `st_timer`, one min/max pair per creat
 spell. AzerothCore models a spell as a min and a max timer while retail uses a fixed cooldown
 plus a per-update chance, so the pair is an approximation - the script's header says which
 quantiles it picks and why the raw extremes are not the ones to publish.
+
+It also classifies every row as `fixed`, `conditional` or `sparse` from the spread between p10
+and p75. The min/max model only describes a spell whose sole gate is its cooldown; an interrupt,
+a heal or a positional attack fires when its CONDITION occurs, so the observed gap measures the
+fight rather than the spell. Measured over this corpus the separation is stark - average spread
+1.6 for `fixed`, 133.2 for `conditional`. For a conditional spell publish only the lower bound:
+p10 is the floor the cooldown imposes, and the initial timer from `entry-values.sql`, which
+measures aggro to first cast, says more than any repeat interval does.
 
 ### 4. Publish the loot and gameobjects
 

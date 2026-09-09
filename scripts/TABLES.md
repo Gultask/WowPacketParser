@@ -249,7 +249,48 @@ Re-running the script drops and recreates these, so losing them costs only time.
 | `co2_recovered`, `co2_recovered_build` | `recover-co2.sql` | ~1 min. **Additive, not dropped** - they are the record of which rows it changed, and deleting them loses the ability to undo it. |
 | `entry_value`, `entry_value_best`, `spell_initial_gap`, `spell_initial_timer`, `waypoint_segment_speed`, `entry_travel_mode` | `entry-values.sql` | minutes |
 | `aura_trusted_sniff`, `entry_controlled`, `spell_aura`, `entry_aura` | `entry-auras.sql` | ~7 min |
-| `st_gap`, `st_timer` | `spell-timers.sql` | minutes |
+| `st_gap`, `st_timer` | `spell-timers.sql` | ~5 min |
+| `entry_equip`, `entry_model`, `entry_vendor`, `entry_quest_item`, `entry_action_spell`, `entry_gossip_menu`, `menu_text`, `menu_option`, `text_line`, `at_teleport`, `entry_spell_target` | `roll-up-tables.sql` | ~1 min |
+
+### Eleven tables were collected and never read
+
+Until `roll-up-tables.sql` existed, eleven parser-written tables had no consumer anywhere in the
+repository: 4.2M rows, about 860 MB, rewritten on every ingest and never turned into an answer.
+They are not hard problems the way `stand_state` is — they mostly want the sniff dimension
+collapsed and the observations counted. The collapse is large because the raw tables record one
+row per sniff per sighting:
+
+| source | raw rows | rolled up | ratio |
+|---|---:|---:|---:|
+| `creature_equip` | 2,133,503 | 11,337 | 188:1 |
+| `creature_template_model` | 1,624,189 | 35,424 | 46:1 |
+| `npc_vendor` | 126,637 | 39,411 | 3:1 |
+| `npc_text` | 90,824 | 22,480 | 4:1 |
+| `creature_gossip` | 31,345 | 4,036 | 8:1 |
+| `gossip_menu` | 25,655 | 5,839 | 4:1 |
+| `gossip_menu_option` | 21,682 | 3,596 | 6:1 |
+| `creature_template_spell` | 14,244 | 1,343 | 11:1 |
+| `creature_quest_item` | 12,519 | 5,342 | 2:1 |
+| `spell_target` | 2,052,019 | 59,832 | 34:1 |
+| `areatrigger_teleport` | 1,862 | 135 | 14:1 |
+
+Every rolled-up table keeps a `sniffs` count. That column is the point: a vendor item seen by
+one capture out of twenty is conditional stock, not standard stock, and nothing else in the data
+can tell those apart.
+
+### `npc_spellclick` has never had a row, and never could
+
+Zero `ok` sniffs out of 4,511 — 2,757 `empty` and 1,754 `unsupported`. This is not missing data
+in the captures, it is a hole in the parser, and the same hole as divergence 3 in the fork notes.
+
+`CollectNpcSpellClicks` pairs `Storage.NpcSpellClicks` (the click) with `Storage.SpellClicks`
+(the cast it produced) and needs both. `Storage.NpcSpellClicks` is filled by `V3_4_0_45166`,
+`V4_4_0_54481` and `V5_5_0_61735`. **`Storage.SpellClicks` is filled by none of them** — only by
+the legacy core `SpellHandler` and by `V4_3_4_15595` / `V5_4_8_18291`. So on WotLK Classic, Cata
+Classic, MoP Classic, TBC Anniversary and Classic Era the inner loop never runs.
+
+Fixing it needs a parser change and a re-ingest, so `roll-up-tables.sql` deliberately writes no
+rollup for it: an empty table would suggest the sniffs lack the data rather than the parser.
 
 ## 3. Orphans — no script creates them
 
