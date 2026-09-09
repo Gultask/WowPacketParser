@@ -448,6 +448,44 @@ fight rather than the spell. Measured over this corpus the separation is stark -
 p10 is the floor the cooldown imposes, and the initial timer from `entry-values.sql`, which
 measures aggro to first cast, says more than any repeat interval does.
 
+### 3c. Curate the casts and publish them
+
+```
+mysql -u root -p wpp_ingest2 < curate-spell-casts.sql
+```
+
+`st_timer` is the working table; this is the one that leaves the database. It strips three things
+the raw casts carry, and the script header argues each of them:
+
+- **Doubled starts.** One cast can emit two `SMSG_SPELL_START` rows, the first with no matching
+  `SPELL_GO`. 10,772 rows, and they are what puts a 247 ms gap where a cooldown should be. Nearly
+  a quarter of all gaps go with them - 3,973,316 down to 3,011,563.
+- **Spells that are not the creature's.** Five, by hand, in `sc_exclude` with a reason on each.
+  48210 Haunt is the big one: 1,285 entries including every raid boss, and 94% of its casts are
+  in sniffs named for a warlock. It is the sniffer.
+- **670 spell ids absent from the 3.3.5a DBC** - modern internal ids the Classic client emits.
+
+There is no automatic player-spell test and the script does not pretend otherwise. Entry breadth
+does not work (Enrage is on 163 entries and is real), `SpellFamilyName` is 0 for Haunt as well as
+for creature spells, `sniff.sniffer` is empty for every row, and wotlkmangos has no
+`skill_line_ability`. `entries_sharing` is published as a column so a reviewer can see a suspect
+instead of the script having silently dropped it.
+
+Two objects come out:
+
+- **`acore_world.sniff_creature_spell`** - one row per entry and spell, initial timers beside
+  repeat timers, `accuracy` on the usual 2/1/0, and `shape`. Read the shape split before trusting
+  a timer: at accuracy 2 there are 2,515 `conditional` rows against 1,545 `fixed`. Most
+  well-sampled spells do not fit a min/max pair at all.
+- **`acore_world.sniff_creature_smartai`** - a view. `WHERE entry = 30989` gives that creature's
+  proposal with a paste-ready `smart_scripts` tuple and `ac_has_it` saying whether AzerothCore
+  already scripts that spell there. It offers accuracy >= 1 only.
+
+**Avenger's Shield on 30986 is the regression check.** AC scripts it as `SMART_EVENT_AGGRO` and
+the sniff agrees independently - 41 pulls, median 0 ms. If the rebuilt table does not call it
+`opener`, the median or the classifier has drifted. It caught exactly that once already: a
+`PERCENT_RANK BETWEEN .4 AND .6` median put it at 524 ms and suppressed 636 openers corpus-wide.
+
 ### 4. Publish the loot and gameobjects
 
 ```

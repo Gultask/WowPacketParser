@@ -231,6 +231,55 @@ Trust the median, not the max: `max_ms` runs to the 60s bound because it is the 
 *that* spell after the pull, and a spell the creature only reaches late in a fight will sit near
 the ceiling. `pulls` is the sample size - one pull proves nothing.
 
+Take the median by **rank**, not by percentile band. `PERCENT_RANK() BETWEEN 0.4 AND 0.6` reads
+as a median and is not one: with four pulls the ranks are 0, .33, .67 and 1, so nothing lands in
+the band and the answer is NULL; and on a spell cast at 0 ms on most pulls it drifts upward off
+the true middle. It cost 636 openers before anyone noticed.
+
+### `creature_spell_cast` needs curating before it can be published
+
+Three things are wrong with the raw table, and none of them is a parse error - the caster gate in
+`SniffFile.cs` correctly requires a Creature or Vehicle GUID.
+
+**One cast can emit two `SMSG_SPELL_START` rows.** The first carries no matching `SPELL_GO`
+(`completed = 0`) and a second completes within about a quarter second. 12 of the 13 sub-1.5s
+consecutive pairs on the Icecrown group carry exactly that 0-then-1 signature. This is what puts
+a 247 ms gap where a cooldown should be, and `min_gap_ms` is the number an AC timer is read from.
+`curate-spell-casts.sql` drops 10,772 such rows, and with them nearly a quarter of every gap in
+the corpus: 3,973,316 down to 3,011,563.
+
+**Some spells are not the creature's.** 48210 Haunt sits on 1,285 entries including Onyxia,
+Anub'arak, Thorim and Algalon, and 11,081 of its 11,770 casts are in sniffs named for a warlock.
+On Onyxia it fires every ~11 s at 100% completion - the warlock's refresh cycle, not a boss
+mechanic. Others are real creature casts that are still not abilities: 1604 Dazed is the melee
+proc (1,966 entries), 29266 Permanent Feign Death is a corpse prop and the single largest spell
+in the corpus at 309,544 casts, 18950 is a passive.
+
+**670 spell ids are absent from the 3.3.5a DBC** - 101,511 casts, 1.7% of the table. Modern
+internal ids the Classic client emits (378027, 414266, 413265 and friends). Whatever they do,
+they cannot go to a 3.3.5a core.
+
+**There is no automatic test for the second one.** Entry breadth does not separate it: Enrage is
+on 163 entries, Shoot 139, Thrash 104, Cleave 102, and all four are genuine. `SpellFamilyName` is
+0 for Haunt as much as for creature spells. `sniff.sniffer` is empty on every row in this corpus.
+wotlkmangos has no `skill_line_ability`. So `sc_exclude` is hand-written with a reason per row and
+`entries_sharing` ships as a column - a number in the hundreds is a reason to look, not to drop.
+
+### What `sniff_creature_spell` says that `st_timer` does not
+
+`shape` is the column to read first. At accuracy 2 the corpus holds 2,515 `conditional` rows
+against 1,545 `fixed`: **most well-sampled creature spells do not fit a min/max timer at all.**
+They wait on something the packets do not carry - health, range, a friendly target, an interrupt
+window - so the observed gap measures the fight, not the spell. For those, publish the lower
+bound and the initial timer and let AC gate the rest with an event.
+
+`opener` is the fourth shape: median initial under 500 ms over five or more pulls. 715 of them at
+accuracy 2. Those are `SMART_EVENT_AGGRO`, not a timer.
+
+The companion view `sniff_creature_smartai` turns a row into a `smart_scripts` proposal, with
+`ac_has_it` flagging whether AzerothCore already scripts that spell on that creature. Of what it
+offers, 2,073 accuracy-2 proposals across 981 entries are things AC does not have.
+
 `sniff_coverage` is the one that is easy to underrate. A sniff that produced no loot because its
 build has no `SMSG_LOOT_RESPONSE` and a sniff that produced no loot because the player looted
 nothing both look like zero rows afterwards. The difference is only knowable at parse time, so
