@@ -350,9 +350,11 @@ was walked. It does not say the route is a circuit, and the difference costs poi
 | n-2 | 2 | **not a loop** - the creature turned round at the end of a line |
 | -1 | - | never came back |
 
-`n-2` is the trap and it is not a rare corner: 13,391 of 25,899 closed routes, more than half.
-Plagued Fiend (31150) route 97579 is six points in a straight line west to east with close_seq 4,
-so the "ring" is its last two points and the other four are filed as an approach. Any consumer
+`n-2` is the trap and it is not a rare corner: 13,139 of 25,318 closed routes, more than half.
+Plagued Fiend (31150) has one that is six points in a straight line west to east with close_seq 4,
+so the "ring" is its last two points and the other four are filed as an approach. Path ids are not
+stable across a re-mine, which is why that route is named by its shape and not by its id. Any
+consumer
 that keeps the ring and drops the approach publishes two points of a six point route.
 mod-sniff-diff did, until `routes/whole-route-on-add`. A ring needs three points to be a ring;
 below that the closing edge means the same thing as retracing an open route, which is what it

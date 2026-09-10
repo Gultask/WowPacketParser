@@ -210,7 +210,7 @@ def main(node_path, edge_path, out_summary, out_points):
         A READER has to weigh how much route close_seq leaves in the ring, because close_seq is
         an observation and not a shape. close_seq = n-2 says the last point leads back to the one
         before it, which is not a circuit at all - it is a creature turning round at the end of a
-        line. 13,391 of the 25,899 closed routes in the published corpus are that shape. Anything
+        line. 13,139 of the 25,318 closed routes in the published corpus are that shape. Anything
         that reads the ring and drops the approach will throw away all but two points of them;
         mod-sniff-diff did exactly that and wrote two-point paths for six-point routes."""
         if closed:
