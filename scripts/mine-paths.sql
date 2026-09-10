@@ -252,22 +252,36 @@ SELECT NOW() AS t, COUNT(*) AS nodes_after_levelling FROM wp_node;
 SELECT NOW() AS t, 'phase 2: every consecutive pair of points' AS step;
 
 -- This LEAD pass used to sit inside the derived table of the INSERT below, and a second copy of
--- it inside phase 4. MySQL cannot merge a windowed derived table into its parent, so each copy
--- materialised all 43M rows into an INTERNAL temp table - and on 2026-09-09 that killed a 105
--- minute mine outright: `ERROR 1114 (HY000) at line 268: The table '...#sql1120_119_c' is full`.
+-- it inside phase 4. It killed two mines in one night, both at this point, both with
 --
--- An internal temp table answers to ceilings nobody set for this job. `temptable_max_ram` is
--- 1 GB, GLOBAL-only and so unreachable from a script that only sets SESSION variables, and the
--- overflow lands in the service account's Temp directory rather than the data drive. A named
--- InnoDB table has the tablespace, the buffer pool, and a size you can measure.
+--   ERROR 1114 (HY000): The table 'C:\...\NETWOR~1\AppData\Local\Temp\#sql...' is full
 --
--- So the pass runs ONCE, by name, and both phases read the result. Phase 4 stops recomputing it,
--- which is the second reason to do this: that copy scanned the same 43M rows again for the sake
--- of a subset of walks.
+-- The first death was the derived table: MySQL cannot merge a windowed one into its parent, so it
+-- materialised all 43.9M rows into an internal temp table. Writing into a named InnoDB table
+-- instead did NOT fix it - the second death was the CREATE TABLE ... AS SELECT itself, because
+-- the windowing step materialises its own output no matter where the rows are going afterwards.
 --
--- No secondary index, deliberately. Both readers scan wp_step whole and probe the small side by
--- its own primary key - wp_node's is (entry, map, xy_key, level), wp_walk's is (sniff_id, guid) -
--- so an index here would buy nothing and cost 43M random insertions to build.
+-- The ceiling is not the disk. 56 GB were free both times, and the temp file was cleaned up on
+-- the way out. It is an internal one nobody set for this job: temptable_max_ram is GLOBAL-only,
+-- so a script that sets SESSION variables cannot reach it, and the overflow lands in the service
+-- account's Temp rather than on the data drive. Rather than hunt for which limit it is, the pass
+-- is made small enough that no limit is in reach.
+--
+-- The window partitions by (sniff_id, guid), so a split on sniff_id can never cut a partition in
+-- half: each batch is a whole number of captures and its result is byte-identical to the same
+-- rows out of one big pass. ix_walk is (sniff_id, guid, segment_id, point_index), which is the
+-- partition and the order, so a batch is an index range scan with no sort at all.
+--
+-- Batches are built to about a million rows rather than a fixed count of captures, because
+-- captures differ by three orders of magnitude in size and a fixed stride would put half the
+-- corpus in one batch.
+--
+-- The pass also runs ONCE now, by name, and phase 4 reads the result instead of computing its own
+-- second copy over the same 43.9M rows.
+--
+-- No secondary index on wp_step, deliberately. Both readers scan it whole and probe the small
+-- side by its own primary key - wp_node's is (entry, map, xy_key, level), wp_walk's is
+-- (sniff_id, guid) - so an index here would buy nothing and cost 43.9M random insertions.
 DROP TABLE IF EXISTS wp_step;
 CREATE TABLE wp_step (
   sniff_id     BIGINT UNSIGNED NOT NULL,
@@ -281,21 +295,74 @@ CREATE TABLE wp_step (
   nz           FLOAT NULL,
   same_segment TINYINT NULL,
   dt_ms        INT NULL
-) ENGINE=InnoDB COMMENT='wp_point with the next point alongside; the input to phase 2 and phase 4'
-AS
-SELECT w.sniff_id, w.guid, w.entry, w.map, w.creation_spline AS is_creation,
-       (CAST(ROUND((w.position_x+17100)*100) AS SIGNED) << 22)
-     +  CAST(ROUND((w.position_y+17100)*100) AS SIGNED)      AS k,
-       w.position_z AS z,
-       LEAD((CAST(ROUND((w.position_x+17100)*100) AS SIGNED) << 22)
-          +  CAST(ROUND((w.position_y+17100)*100) AS SIGNED))
-         OVER (PARTITION BY w.sniff_id, w.guid ORDER BY w.segment_id, w.point_index) AS nk,
-       LEAD(w.position_z)
-         OVER (PARTITION BY w.sniff_id, w.guid ORDER BY w.segment_id, w.point_index) AS nz,
-       (LEAD(w.segment_id) OVER (PARTITION BY w.sniff_id, w.guid ORDER BY w.segment_id, w.point_index) = w.segment_id) AS same_segment,
-       TIMESTAMPDIFF(MICROSECOND, w.seen_utc,
-          LEAD(w.seen_utc) OVER (PARTITION BY w.sniff_id, w.guid ORDER BY w.segment_id, w.point_index)) DIV 1000 AS dt_ms
-FROM wp_point w;
+) ENGINE=InnoDB COMMENT='wp_point with the next point alongside; the input to phase 2b and phase 4';
+
+-- Which captures go in which batch. Both derived tables here are one row per capture, a few
+-- thousand of them, so the running total is the one window function in this file that cannot
+-- grow with the corpus.
+DROP TABLE IF EXISTS wp_step_batch;
+CREATE TABLE wp_step_batch (
+  sniff_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  batch    INT NOT NULL,
+  KEY ix_batch (batch)
+) ENGINE=InnoDB
+SELECT d.sniff_id, CAST(FLOOR((d.run - 1) / 1000000) AS SIGNED) AS batch
+FROM (
+  SELECT c.sniff_id, SUM(c.pts) OVER (ORDER BY c.sniff_id) AS run
+  FROM (SELECT sniff_id, COUNT(*) AS pts FROM wp_point GROUP BY sniff_id) c
+) d;
+
+SELECT NOW() AS t, COUNT(DISTINCT batch) AS batches, COUNT(*) AS captures FROM wp_step_batch;
+
+-- Batches are contiguous ranges of sniff_id by construction, so the loop hands each one to a
+-- BETWEEN and the optimiser gets a plain range scan. Handing it the batch table to join against
+-- would work too and would throw the index ordering away.
+DROP PROCEDURE IF EXISTS wp_fill_step;
+DELIMITER $$
+CREATE PROCEDURE wp_fill_step()
+BEGIN
+  DECLARE done INT DEFAULT 0;
+  DECLARE n INT DEFAULT 0;
+  DECLARE r INT DEFAULT 0;
+  DECLARE lo BIGINT UNSIGNED;
+  DECLARE hi BIGINT UNSIGNED;
+  DECLARE cur CURSOR FOR
+    SELECT MIN(sniff_id), MAX(sniff_id) FROM wp_step_batch GROUP BY batch ORDER BY batch;
+  DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1;
+
+  OPEN cur;
+  fill: LOOP
+    FETCH cur INTO lo, hi;
+    IF done THEN LEAVE fill; END IF;
+
+    INSERT INTO wp_step (sniff_id, guid, entry, map, is_creation, k, z, nk, nz, same_segment, dt_ms)
+    SELECT w.sniff_id, w.guid, w.entry, w.map, w.creation_spline,
+           (CAST(ROUND((w.position_x+17100)*100) AS SIGNED) << 22)
+         +  CAST(ROUND((w.position_y+17100)*100) AS SIGNED),
+           w.position_z,
+           LEAD((CAST(ROUND((w.position_x+17100)*100) AS SIGNED) << 22)
+              +  CAST(ROUND((w.position_y+17100)*100) AS SIGNED)) OVER wnd,
+           LEAD(w.position_z) OVER wnd,
+           (LEAD(w.segment_id) OVER wnd = w.segment_id),
+           TIMESTAMPDIFF(MICROSECOND, w.seen_utc, LEAD(w.seen_utc) OVER wnd) DIV 1000
+    FROM wp_point w
+    WHERE w.sniff_id BETWEEN lo AND hi
+    WINDOW wnd AS (PARTITION BY w.sniff_id, w.guid ORDER BY w.segment_id, w.point_index);
+
+    -- Immediately after the INSERT: ROW_COUNT() answers for the statement before it, and the
+    -- SET below would be that statement.
+    SET r = ROW_COUNT();
+    SET n = n + 1;
+    IF n % 5 = 0 THEN
+      SELECT NOW() AS t, n AS batches_done, r AS rows_in_the_last_one;
+    END IF;
+  END LOOP;
+  CLOSE cur;
+END $$
+DELIMITER ;
+
+CALL wp_fill_step();
+DROP PROCEDURE wp_fill_step;
 
 SELECT NOW() AS t, COUNT(*) AS steps, SUM(nk IS NULL) AS ends_of_a_walk FROM wp_step;
 

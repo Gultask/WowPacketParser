@@ -329,7 +329,7 @@ Re-running the script drops and recreates these, so losing them costs only time.
 
 | tables | built by | cost |
 |---|---|---|
-| `wp_point`, `wp_step`, `wp_node`, `wp_edge`, `wp_edge_raw`, `wp_level`, `wp_stack`, `wp_zobs`, `wp_step_ok`, `wp_walk`, `wp_walk_xy`, `wp_edge_walk` | `mine-paths.sql` | ~2 h. `wp_point` is 10.5 GB and `wp_step` about 4 GB - budget the disk, not just the time. |
+| `wp_point`, `wp_step`, `wp_step_batch`, `wp_node`, `wp_edge`, `wp_edge_raw`, `wp_level`, `wp_stack`, `wp_zobs`, `wp_step_ok`, `wp_walk`, `wp_walk_xy`, `wp_edge_walk` | `mine-paths.sql` | ~2 h. `wp_point` is 10.5 GB and `wp_step` about 4 GB - budget the disk, not just the time. |
 | `path_summary`, `path_point` | `mine-paths.sh` (via `chain-paths.py`) | 11 s once the graph exists |
 | `dg_spawn`, `dg_est`, `dg_approx`, `dg_fixed`, `dg_inst_rad`, `dg_rad_key`, `dg_path_span`, `dg_route_pt`, `dg_state` | `build-digest.sql` | ~4 h |
 | `co2_recovered`, `co2_recovered_build` | `recover-co2.sql` | ~1 min. **Additive, not dropped** - they are the record of which rows it changed, and deleting them loses the ability to undo it. |
