@@ -15,6 +15,16 @@ WORK="${1:-/c/WowPacketParser/scripts/.paths}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$WORK"
 
+# The buffer pool goes back to its 128 MB default whenever the MySQL service restarts, and a
+# mine at that size is not slow, it is a different job - phase 0 alone took 57 minutes on
+# 2026-09-09 before anyone noticed. Warn rather than change it: an online resize is the
+# operator's call and this script does not own the server.
+POOL=$($MYSQL -N -e "SELECT @@innodb_buffer_pool_size" 2>/dev/null | tr -dc 0-9)
+if [ -n "${POOL:-}" ] && [ "$POOL" -lt 1073741824 ]; then
+  echo "WARNING: innodb_buffer_pool_size is $((POOL/1024/1024)) MB. Everything below will crawl."
+  echo "         SET GLOBAL innodb_buffer_pool_size = 4294967296;   -- online, reverts on restart"
+fi
+
 # SKIP_MINE=1 picks the run up at the export, for when mine-paths.sql already ran - including
 # when it was resumed by hand from a middle phase after a failure. The mine is two hours and
 # phases 0 and 1 are deterministic, so re-deriving wp_point to redo a five minute export is
