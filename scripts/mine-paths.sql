@@ -249,7 +249,57 @@ FROM wp_level l JOIN wp_stack s
 
 SELECT NOW() AS t, COUNT(*) AS nodes_after_levelling FROM wp_node;
 
-SELECT NOW() AS t, 'phase 2: edges between candidate nodes' AS step;
+SELECT NOW() AS t, 'phase 2: every consecutive pair of points' AS step;
+
+-- This LEAD pass used to sit inside the derived table of the INSERT below, and a second copy of
+-- it inside phase 4. MySQL cannot merge a windowed derived table into its parent, so each copy
+-- materialised all 43M rows into an INTERNAL temp table - and on 2026-09-09 that killed a 105
+-- minute mine outright: `ERROR 1114 (HY000) at line 268: The table '...#sql1120_119_c' is full`.
+--
+-- An internal temp table answers to ceilings nobody set for this job. `temptable_max_ram` is
+-- 1 GB, GLOBAL-only and so unreachable from a script that only sets SESSION variables, and the
+-- overflow lands in the service account's Temp directory rather than the data drive. A named
+-- InnoDB table has the tablespace, the buffer pool, and a size you can measure.
+--
+-- So the pass runs ONCE, by name, and both phases read the result. Phase 4 stops recomputing it,
+-- which is the second reason to do this: that copy scanned the same 43M rows again for the sake
+-- of a subset of walks.
+--
+-- No secondary index, deliberately. Both readers scan wp_step whole and probe the small side by
+-- its own primary key - wp_node's is (entry, map, xy_key, level), wp_walk's is (sniff_id, guid) -
+-- so an index here would buy nothing and cost 43M random insertions to build.
+DROP TABLE IF EXISTS wp_step;
+CREATE TABLE wp_step (
+  sniff_id     BIGINT UNSIGNED NOT NULL,
+  guid         VARCHAR(40) NOT NULL,
+  entry        INT UNSIGNED NOT NULL,
+  map          INT UNSIGNED NOT NULL,
+  is_creation  TINYINT NOT NULL,
+  k            BIGINT NOT NULL COMMENT 'this point as an xy_key',
+  z            FLOAT NOT NULL,
+  nk           BIGINT NULL COMMENT 'the next point the server sent this guid to; NULL ends its walk',
+  nz           FLOAT NULL,
+  same_segment TINYINT NULL,
+  dt_ms        INT NULL
+) ENGINE=InnoDB COMMENT='wp_point with the next point alongside; the input to phase 2 and phase 4'
+AS
+SELECT w.sniff_id, w.guid, w.entry, w.map, w.creation_spline AS is_creation,
+       (CAST(ROUND((w.position_x+17100)*100) AS SIGNED) << 22)
+     +  CAST(ROUND((w.position_y+17100)*100) AS SIGNED)      AS k,
+       w.position_z AS z,
+       LEAD((CAST(ROUND((w.position_x+17100)*100) AS SIGNED) << 22)
+          +  CAST(ROUND((w.position_y+17100)*100) AS SIGNED))
+         OVER (PARTITION BY w.sniff_id, w.guid ORDER BY w.segment_id, w.point_index) AS nk,
+       LEAD(w.position_z)
+         OVER (PARTITION BY w.sniff_id, w.guid ORDER BY w.segment_id, w.point_index) AS nz,
+       (LEAD(w.segment_id) OVER (PARTITION BY w.sniff_id, w.guid ORDER BY w.segment_id, w.point_index) = w.segment_id) AS same_segment,
+       TIMESTAMPDIFF(MICROSECOND, w.seen_utc,
+          LEAD(w.seen_utc) OVER (PARTITION BY w.sniff_id, w.guid ORDER BY w.segment_id, w.point_index)) DIV 1000 AS dt_ms
+FROM wp_point w;
+
+SELECT NOW() AS t, COUNT(*) AS steps, SUM(nk IS NULL) AS ends_of_a_walk FROM wp_step;
+
+SELECT NOW() AS t, 'phase 2b: edges between candidate nodes' AS step;
 
 DROP TABLE IF EXISTS wp_edge_raw;
 CREATE TABLE wp_edge_raw (
@@ -267,21 +317,7 @@ CREATE TABLE wp_edge_raw (
 
 INSERT INTO wp_edge_raw (entry, map, from_key, to_key, sniff_id, guid, same_segment, is_creation, dt_ms)
 SELECT x.entry, x.map, a.node_key, b.node_key, x.sniff_id, x.guid, x.same_segment, x.is_creation, x.dt_ms
-FROM (
-  SELECT w.entry, w.map, w.sniff_id, w.guid, w.creation_spline AS is_creation,
-         (CAST(ROUND((w.position_x+17100)*100) AS SIGNED) << 22)
-       +  CAST(ROUND((w.position_y+17100)*100) AS SIGNED)      AS k,
-         w.position_z AS z,
-         LEAD((CAST(ROUND((w.position_x+17100)*100) AS SIGNED) << 22)
-            +  CAST(ROUND((w.position_y+17100)*100) AS SIGNED))
-           OVER (PARTITION BY w.sniff_id, w.guid ORDER BY w.segment_id, w.point_index) AS nk,
-         LEAD(w.position_z)
-           OVER (PARTITION BY w.sniff_id, w.guid ORDER BY w.segment_id, w.point_index) AS nz,
-         (LEAD(w.segment_id) OVER (PARTITION BY w.sniff_id, w.guid ORDER BY w.segment_id, w.point_index) = w.segment_id) AS same_segment,
-         TIMESTAMPDIFF(MICROSECOND, w.seen_utc,
-            LEAD(w.seen_utc) OVER (PARTITION BY w.sniff_id, w.guid ORDER BY w.segment_id, w.point_index)) DIV 1000 AS dt_ms
-  FROM wp_point w
-) x
+FROM wp_step x
 JOIN wp_node a ON a.entry = x.entry AND a.map = x.map AND a.xy_key = x.k
               AND x.z  BETWEEN a.z_lo AND a.z_hi
 JOIN wp_node b ON b.entry = x.entry AND b.map = x.map AND b.xy_key = x.nk
@@ -498,22 +534,8 @@ SELECT x.entry, x.map, a.node_key AS from_key, b.node_key AS to_key,
        COUNT(DISTINCT x.guid) AS n_guids,
        SUM(x.same_segment) AS spline_obs, SUM(x.is_creation) AS creation_obs,
        CAST(AVG(x.dt_ms) AS SIGNED) AS median_dt_ms
-FROM (
-  SELECT w.entry, w.map, w.sniff_id, w.guid, w.creation_spline AS is_creation,
-         (CAST(ROUND((w.position_x+17100)*100) AS SIGNED) << 22)
-       +  CAST(ROUND((w.position_y+17100)*100) AS SIGNED)      AS k,
-         w.position_z AS z,
-         LEAD((CAST(ROUND((w.position_x+17100)*100) AS SIGNED) << 22)
-            +  CAST(ROUND((w.position_y+17100)*100) AS SIGNED))
-           OVER (PARTITION BY w.sniff_id, w.guid ORDER BY w.segment_id, w.point_index) AS nk,
-         LEAD(w.position_z)
-           OVER (PARTITION BY w.sniff_id, w.guid ORDER BY w.segment_id, w.point_index) AS nz,
-         (LEAD(w.segment_id) OVER (PARTITION BY w.sniff_id, w.guid ORDER BY w.segment_id, w.point_index) = w.segment_id) AS same_segment,
-         TIMESTAMPDIFF(MICROSECOND, w.seen_utc,
-            LEAD(w.seen_utc) OVER (PARTITION BY w.sniff_id, w.guid ORDER BY w.segment_id, w.point_index)) DIV 1000 AS dt_ms
-  FROM wp_point w
-  JOIN wp_walk v ON v.sniff_id = w.sniff_id AND v.guid = w.guid
-) x
+FROM wp_step x
+JOIN wp_walk v ON v.sniff_id = x.sniff_id AND v.guid = x.guid
 JOIN wp_node a ON a.entry = x.entry AND a.map = x.map AND a.xy_key = x.k
               AND x.z  BETWEEN a.z_lo AND a.z_hi
 JOIN wp_node b ON b.entry = x.entry AND b.map = x.map AND b.xy_key = x.nk

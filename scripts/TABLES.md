@@ -329,14 +329,34 @@ Re-running the script drops and recreates these, so losing them costs only time.
 
 | tables | built by | cost |
 |---|---|---|
-| `wp_point`, `wp_node`, `wp_edge`, `wp_edge_raw`, `wp_level`, `wp_stack`, `wp_zobs`, `wp_step_ok`, `wp_walk`, `wp_walk_xy`, `wp_edge_walk` | `mine-paths.sql` | ~2 h |
+| `wp_point`, `wp_step`, `wp_node`, `wp_edge`, `wp_edge_raw`, `wp_level`, `wp_stack`, `wp_zobs`, `wp_step_ok`, `wp_walk`, `wp_walk_xy`, `wp_edge_walk` | `mine-paths.sql` | ~2 h. `wp_point` is 10.5 GB and `wp_step` about 4 GB - budget the disk, not just the time. |
 | `path_summary`, `path_point` | `mine-paths.sh` (via `chain-paths.py`) | 11 s once the graph exists |
-| `dg_spawn`, `dg_est`, `dg_approx`, `dg_fixed`, `dg_inst_rad`, `dg_rad_key`, `dg_route_pt`, `dg_state` | `build-digest.sql` | ~4 h |
+| `dg_spawn`, `dg_est`, `dg_approx`, `dg_fixed`, `dg_inst_rad`, `dg_rad_key`, `dg_path_span`, `dg_route_pt`, `dg_state` | `build-digest.sql` | ~4 h |
 | `co2_recovered`, `co2_recovered_build` | `recover-co2.sql` | ~1 min. **Additive, not dropped** - they are the record of which rows it changed, and deleting them loses the ability to undo it. |
 | `entry_value`, `entry_value_best`, `spell_initial_gap`, `spell_initial_timer`, `waypoint_segment_speed`, `entry_travel_mode` | `entry-values.sql` | minutes |
 | `aura_trusted_sniff`, `entry_controlled`, `spell_aura`, `entry_aura` | `entry-auras.sql` | ~7 min |
 | `st_gap`, `st_timer` | `spell-timers.sql` | ~5 min |
 | `entry_equip`, `entry_model`, `entry_vendor`, `entry_quest_item`, `entry_action_spell`, `entry_gossip_menu`, `menu_text`, `menu_option`, `text_line`, `at_teleport`, `entry_spell_target` | `roll-up-tables.sql` | ~1 min |
+
+### `close_seq` is an observation, not a shape
+
+`path_summary.close_seq` is the seq the route's LAST point leads back to, or -1. It says an edge
+was walked. It does not say the route is a circuit, and the difference costs points:
+
+| `close_seq` | ring size | what it is |
+|---|---|---|
+| 0 | all of it | a plain ring |
+| between 1 and n-3 | n - close_seq | walks in along a tail, then circles |
+| n-2 | 2 | **not a loop** - the creature turned round at the end of a line |
+| -1 | - | never came back |
+
+`n-2` is the trap and it is not a rare corner: 13,391 of 25,899 closed routes, more than half.
+Plagued Fiend (31150) route 97579 is six points in a straight line west to east with close_seq 4,
+so the "ring" is its last two points and the other four are filed as an approach. Any consumer
+that keeps the ring and drops the approach publishes two points of a six point route.
+mod-sniff-diff did, until `routes/whole-route-on-add`. A ring needs three points to be a ring;
+below that the closing edge means the same thing as retracing an open route, which is what it
+should be turned into.
 
 ### Eleven tables were collected and never read
 

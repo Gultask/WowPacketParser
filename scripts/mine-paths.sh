@@ -15,8 +15,16 @@ WORK="${1:-/c/WowPacketParser/scripts/.paths}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$WORK"
 
-echo "== mining nodes and edges =="
-$MYSQL --table "$DB" < "$HERE/mine-paths.sql"
+# SKIP_MINE=1 picks the run up at the export, for when mine-paths.sql already ran - including
+# when it was resumed by hand from a middle phase after a failure. The mine is two hours and
+# phases 0 and 1 are deterministic, so re-deriving wp_point to redo a five minute export is
+# not a price worth paying twice.
+if [[ "${SKIP_MINE:-0}" == "1" ]]; then
+  echo "== skipping the mine; wp_node and wp_edge are taken as they stand =="
+else
+  echo "== mining nodes and edges =="
+  $MYSQL --table "$DB" < "$HERE/mine-paths.sql"
+fi
 
 echo "== exporting =="
 # --batch gives a tab separated dump with a header row, which is what chain-paths.py reads.
