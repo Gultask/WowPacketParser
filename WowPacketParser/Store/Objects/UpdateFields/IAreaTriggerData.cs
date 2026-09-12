@@ -1,4 +1,6 @@
 ﻿
+using WowPacketParser.Misc;
+
 namespace WowPacketParser.Store.Objects.UpdateFields
 {
     public interface IAreaTriggerData
@@ -8,6 +10,7 @@ namespace WowPacketParser.Store.Objects.UpdateFields
         uint? TimeToTarget { get; }
         uint? TimeToTargetScale { get; }
         uint? DecalPropertiesID { get; }
+        int? PositionalSoundKitID => null;
 
         uint? Flags => null;
         uint? ScaleCurveId => null;
@@ -27,5 +30,10 @@ namespace WowPacketParser.Store.Objects.UpdateFields
         IAreaTriggerBoundedPlane BoundedPlane => null;
 
         IVisualAnim VisualAnim => null;
+
+        Vector3? RollPitchYaw => null;
+        Vector3? TargetRollPitchYaw => null;
+
+        bool? HeightIgnoresScale => null;
     }
 }
