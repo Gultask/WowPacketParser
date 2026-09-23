@@ -35,7 +35,7 @@ namespace WowPacketParserModule.V5_5_0_61735.Parsers
                 MenuID = menuId
             };
 
-            gossipOption.GossipOptionID = packet.ReadInt32("GossipOptionID", idx);
+            gossipOption.GossipOptionID = gossipMessageOption.GossipOptionID = packet.ReadInt32("GossipOptionID", idx);
 
             if (ClientVersion.AddedInVersion(ClientVersionBuild.V5_5_3_64802))
                 gossipOption.OptionNpc = (GossipOptionNpc?)packet.ReadInt32("OptionNPC", idx);

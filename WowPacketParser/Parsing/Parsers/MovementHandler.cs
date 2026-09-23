@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
@@ -18,6 +18,26 @@ namespace WowPacketParser.Parsing.Parsers
     {
         [ThreadStatic]
         public static uint CurrentMapId;
+
+        /// <summary>
+        /// Every world change in the file, in order, with where the player landed. The
+        /// destination is only ever in this packet, so an areatrigger teleport cannot be
+        /// reconstructed without it. Cleared per sniff alongside <see cref="CurrentMapId"/>.
+        /// </summary>
+        public static readonly List<WorldPortRecord> WorldPorts = new List<WorldPortRecord>();
+
+        public static void RecordWorldPort(Packet packet, Vector4 position)
+        {
+            WorldPorts.Add(new WorldPortRecord
+            {
+                Time = packet.Time,
+                Map = CurrentMapId,
+                PositionX = position.X,
+                PositionY = position.Y,
+                PositionZ = position.Z,
+                Orientation = position.O
+            });
+        }
 
         public static uint? CurrentDifficultyID = null; // null and not -1 to force compiler errors when code isnt right
         public static int CurrentPhaseMask = 1;
@@ -536,7 +556,7 @@ namespace WowPacketParser.Parsing.Parsers
         public static void HandleEnterWorld(Packet packet)
         {
             CurrentMapId = (uint) packet.ReadInt32<MapId>("Map ID");
-            packet.ReadVector4("Position");
+            RecordWorldPort(packet, packet.ReadVector4("Position"));
 
             packet.AddSniffData(StoreNameType.Map, (int) CurrentMapId, "NEW_WORLD");
         }
@@ -545,9 +565,10 @@ namespace WowPacketParser.Parsing.Parsers
         [Parser(Opcode.SMSG_NEW_WORLD, ClientVersionBuild.V4_2_2_14545, ClientVersionBuild.V4_3_4_15595)]
         public static void HandleNewWorld422(Packet packet)
         {
-            packet.ReadVector3("Position");
+            var position422 = packet.ReadVector3("Position");
             CurrentMapId = (uint) packet.ReadInt32<MapId>("Map");
-            packet.ReadSingle("Orientation");
+            var orientation422 = packet.ReadSingle("Orientation");
+            RecordWorldPort(packet, new Vector4(position422.X, position422.Y, position422.Z, orientation422));
 
             packet.AddSniffData(StoreNameType.Map, (int)CurrentMapId, "NEW_WORLD");
         }
@@ -557,10 +578,11 @@ namespace WowPacketParser.Parsing.Parsers
         public static void HandleNewWorld510(Packet packet)
         {
             CurrentMapId = (uint)packet.ReadInt32<MapId>("Map");
-            packet.ReadSingle("Y");
-            packet.ReadSingle("Orientation");
-            packet.ReadSingle("X");
-            packet.ReadSingle("Z");
+            var y510 = packet.ReadSingle("Y");
+            var o510 = packet.ReadSingle("Orientation");
+            var x510 = packet.ReadSingle("X");
+            var z510 = packet.ReadSingle("Z");
+            RecordWorldPort(packet, new Vector4(x510, y510, z510, o510));
 
             packet.AddSniffData(StoreNameType.Map, (int)CurrentMapId, "NEW_WORLD");
         }

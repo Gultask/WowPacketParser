@@ -35,20 +35,17 @@ namespace WowPacketParser.Store.Objects
         public uint? PhaseMask;
         public string Phases;
 
-        public int? Level;
+
         /// <summary>Lets elite and rank be told apart without consulting a world database.</summary>
         public long? Health;
-        public int? FactionTemplate;
-        public uint? UnitFlags;
+
 
         // The three states AzerothCore's creature_addon carries: emote, and the two packed into
         // bytes1/bytes2. Stored raw and separately rather than pre-packed, because the packing
         // differs between cores and a sniff should record what the server said, not one core's
         // encoding of it. AnimTier and VisFlags share bytes1 with StandState and are one line
         // away here if the addon table ever needs rebuilding wholesale.
-        public int? EmoteState;
-        public byte? StandState;
-        public byte? SheatheState;
+
 
         public DateTime? FirstSeenUtc;
     }

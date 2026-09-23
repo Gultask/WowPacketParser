@@ -2,6 +2,7 @@
 using WowPacketParser.Enums;
 using WowPacketParser.Misc;
 using WowPacketParser.Parsing;
+using WowPacketParser.Proto;
 using WowPacketParser.Store;
 using WowPacketParser.Store.Objects;
 
@@ -677,11 +678,12 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
         [Parser(Opcode.SMSG_LOG_XP_GAIN, ClientVersionBuild.V3_4_4_59817)]
         public static void HandleLogXPGain(Packet packet)
         {
-            packet.ReadPackedGuid128("Victim");
-            packet.ReadInt32("Original");
-            packet.ReadByte("Reason");
-            packet.ReadInt32("Amount");
-            packet.ReadSingle("GroupBonus");
+            var xp = packet.Holder.LogXpGain = new();
+            xp.Victim = packet.ReadPackedGuid128("Victim");
+            xp.Original = packet.ReadInt32("Original");
+            xp.Reason = packet.ReadByte("Reason");
+            xp.Amount = packet.ReadInt32("Amount");
+            xp.GroupBonus = packet.ReadSingle("GroupBonus");
         }
 
         [Parser(Opcode.SMSG_POWER_UPDATE, ClientVersionBuild.V3_4_4_59817)]

@@ -236,7 +236,7 @@ namespace WowPacketParserModule.V6_0_2_19033.Parsers
                     var hasMaxDuration = packet.ReadBit("HasRemaining", i);
 
                     if (hasCasterGUID)
-                        auraEntry.CasterUnit = packet.ReadPackedGuid128("CastUnit", i);
+                        auraEntry.CasterUnit = aura.CasterGuid = packet.ReadPackedGuid128("CastUnit", i);
 
                     aura.Duration = hasDuration ? packet.ReadInt32("Duration", i) : 0;
                     aura.MaxDuration = hasMaxDuration ? packet.ReadInt32("Remaining", i) : 0;

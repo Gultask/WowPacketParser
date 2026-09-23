@@ -340,6 +340,7 @@ namespace WowPacketParser.Misc
             unit.AttackRoundBaseTime.FillFrom(data.AttackRoundBaseTime, ToProto);
             unit.Resistances.FillFrom(data.Resistances, ToProto);
             unit.VirtualItems.FillFrom(data.VirtualItems, item => item != null ? item.ToProto() : new VisibleItemFields());
+            OwnerStatFields.Fill(unit, data);
         }
 
         private static void FillFrom<TDest, TSource>(this RepeatedField<TDest> field, TSource[] source, Func<TSource, TDest> mappingFunc)

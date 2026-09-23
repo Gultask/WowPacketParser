@@ -79,6 +79,36 @@ namespace WowPacketParserModule.V5_5_0_61735.Parsers
                 var partWriter = new StringBuilderProtoPart(packet.Writer);
                 packet.AddValue("UpdateType", type.ToString(), i);
                 var guid = packet.ReadPackedGuid128("Object Guid", i);
+
+                // The Anniversary client line stopped sending CreateObject2 altogether: every
+                // spawn arrives as CreateObject1, so a capture made specifically to record spawn
+                // points yields none. Upstream hit the same wall on retail and rebuilds the flag
+                // from the spawn timestamp the GUID carries in its low 23 bits - see
+                // V12_0_0_65390's UpdateHandler, which applies it to every packet it parses.
+                //
+                // The gate is a build check rather than V12's blanket application because this
+                // module is shared: GetVersionDefiningBuild routes MoP Classic 5.5.x, Classic Era
+                // 1.15.8 and TBC 2.5.5/2.5.6 all here, and MoP Classic still sends the real flag.
+                // Measured over this corpus, every build from 65417 up is silent - 258,230 spawn
+                // rows across 182 sniffs with not one CO2 - while MoP at 64857 still produces
+                // them through this very code path. Applying the heuristic there would manufacture
+                // CO2s on top of genuine ones.
+                if (type == UpdateTypeCataclysm.CreateObject1 &&
+                    ClientVersion.AddedInVersion(ClientVersionBuild.V2_5_5_65417))
+                {
+                    var packetTimestamp = Utilities.GetUnixTimeFromDateTime(packet.Time);
+
+                    var spawnTimestamp = packetTimestamp & ~((1 << 23) - 1);
+                    spawnTimestamp += guid.GetSpawnTimestamp();
+
+                    var timestampDiff = Math.Abs(spawnTimestamp - packetTimestamp);
+                    if (timestampDiff <= Settings.TreatAsCreateObject2Tolerance && !Storage.Objects.ContainsKey(guid))
+                        type = UpdateTypeCataclysm.CreateObject2;
+
+                    packet.AddValue("TreatAsCreateObject2", (type == UpdateTypeCataclysm.CreateObject2), i);
+                    packet.AddValue("TimestampDiff", timestampDiff, i);
+                }
+
                 switch (type)
                 {
                     case UpdateTypeCataclysm.Values:
@@ -277,11 +307,11 @@ namespace WowPacketParserModule.V5_5_0_61735.Parsers
                                 break;
                             }
                             case ObjectType.Player:
-                                handler.ReadCreateUnitData(fieldsData, flags, index);
+                                createObject.Values.Fields.UpdateData(handler.ReadCreateUnitData(fieldsData, flags, index));
                                 handler.ReadCreatePlayerData(fieldsData, flags, index);
                                 break;
                             case ObjectType.ActivePlayer:
-                                handler.ReadCreateUnitData(fieldsData, flags, index);
+                                createObject.Values.Fields.UpdateData(handler.ReadCreateUnitData(fieldsData, flags, index));
                                 handler.ReadCreatePlayerData(fieldsData, flags, index);
                                 handler.ReadCreateActivePlayerData(fieldsData, flags, index);
                                 break;

@@ -242,19 +242,57 @@ JOIN loot_instance_item i ON i.sniff_id = l.sniff_id AND i.loot_index = l.loot_i
 --                 per-entry table. e1..e8 are the entries seen there, commonest first, with the
 --                 share of observations each took.
 --
--- Eight columns because eight is where the data stops, not where the table does. 105,510 of the
--- 105,526 positions hold eight entries or fewer, and the real eights are real pools: Charred
--- Wreckage across 8 entries over 35 sniffs, Un'Goro's power crystals as 4 colours x 2 entries
--- over 33. Exactly 16 positions go higher, none seen by more than 7 sniffs, and every one of
--- them is a firework launch point - Stormwind's show fires 22 different rockets out of one
--- coordinate. That is the same transient-reuse effect rot_variants flags, not pool membership.
+-- COLUMN NAMES MATCH `gameobject`. `id`, `map`, `zoneId`, `areaId`, `phaseMask`, `position_x/y/z`,
+-- `orientation`, `rotation0..3` and `VerifiedBuild` are spelled exactly as AzerothCore spells
+-- them, so importing is a SELECT with no aliasing. They were `entry`, `x/y/z`, `o`, `rot0..3` and
+-- `first_build` until 2026-09-21; anything reading the old names needs updating, including the
+-- released bundle and mod-sniff-diff. The remaining columns - `obs`, `sniffs`, the branch counts,
+-- `rot_variants`, `last_build`, `first_seen_utc` - are evidence about the sniffing, not fields
+-- AzerothCore has, and keep their own names.
 --
--- Rotation is the COMMONEST quaternion captured, never an average - a component-wise mean of
--- four rotations is not a rotation. `rot_variants` says how many distinct ones were seen at that
--- spot: 1 for 131,944 of the 132,101 spawns, because every capture of a fixed gameobject reads
--- the same server-side row. The 157 that disagree are all transient - Blaze, Noblegarden eggs,
--- summoner visuals - genuinely different objects landing on one coordinate, not a grouping
--- error. Treat rot_variants > 1 as "this spot is reused", not as a rotation worth importing.
+-- `VerifiedBuild` is the EARLIEST build that saw the row, not the latest. AzerothCore's own
+-- tooling writes the build it confirmed against; this reads "known good at least since", and
+-- `last_build` beside it gives the other end. Do not assume the AC convention here.
+--
+-- `zoneId` and `areaId` are the weakest columns in the table. The parser takes them from
+-- WorldStateHandler.CurrentAreaId, which is where the SNIFFING PLAYER was standing, not where
+-- the object is - see UpdateHandler.cs. For a fixed object the two usually coincide, because you
+-- have to be near it to see it, but they part company at zone borders and wherever visibility
+-- reaches across one: 49,652 positions were seen from two different areas and 5,972 from two
+-- different zones. Published here is the COMMONEST zone and area at the position, taken as a
+-- pair from the same observations, with captures that recorded neither left out of the vote
+-- instead of winning it. So read these as "where the sniffers stood", not as a terrain lookup;
+-- for anything that has to be exactly right, derive them from map and coordinates. NULL means no
+-- capture of that position knew either value - coalesce it when importing, because AzerothCore
+-- declares both NOT NULL DEFAULT 0.
+--
+-- `phaseMask` is 1 on all 2,227,881 ingest rows, because the parser implements no phase
+-- heuristics at all - that is an unwritten column, not a measurement that came out uniform. It
+-- is here so the insert into `gameobject` is literal, and it is worth nothing on its own.
+--
+-- Rotation is the quaternion of ONE REAL OBSERVATION, never an average - a component-wise mean
+-- of four rotations is not a rotation. Which observation: the commonest quaternion at that spot,
+-- rounded to four decimals to decide "commonest", then the exact float as it was sniffed. The
+-- rounding is a GROUPING key only and no longer reaches the published value, which it did until
+-- 2026-09-21 - that shortened every component to four decimals and flattened small ones to zero
+-- outright, so a rotation sniffed as 0.00142357 published as 0. The client sends these as floats,
+-- so the exact float is the ceiling; the DOUBLE columns hold it without adding precision nobody
+-- measured.
+--
+-- `rot_variants` says how many distinct rotations were seen at that spot, still counted on the
+-- rounded quaternion: 1 for 142,032 of the 142,271 spawns, because every capture of a fixed
+-- gameobject reads the same server-side row. The 239 that disagree are all transient - Blaze,
+-- Noblegarden eggs, summoner visuals - genuinely different objects landing on one coordinate,
+-- not a grouping error. Treat rot_variants > 1 as "this spot is reused", not as a rotation worth
+-- importing.
+--
+-- Eight columns because eight is where the data stops, not where the table does. 113,298 of the
+-- 113,326 positions hold eight entries or fewer, and the real eights are real pools: Charred
+-- Wreckage across 8 entries over 35 sniffs, Un'Goro's power crystals as 4 colours x 2 entries
+-- over 33. Exactly 28 positions go higher, none seen by more than 7 sniffs: firework launch
+-- points, where Stormwind's show fires 22 different rockets out of one coordinate, plus 14
+-- Stratholme supply crates and an Isle of Conquest banner aura. That is the same transient-reuse
+-- effect rot_variants flags, not pool membership.
 --
 -- `pct` is the share of observations, NOT a spawn chance. One sniffer parked next to a node for
 -- an hour weights it. Read `obs` and `sniffs` beside it: a split measured across many sniffs is
@@ -265,58 +303,93 @@ JOIN loot_instance_item i ON i.sniff_id = l.sniff_id AND i.loot_index = l.loot_i
 -- -------------------------------------------------------------------------------------------
 DROP TABLE IF EXISTS acore_world.sniff_gameobject_spawn;
 CREATE TABLE acore_world.sniff_gameobject_spawn (
-  entry INT UNSIGNED NOT NULL,
-  map   INT UNSIGNED NOT NULL,
-  x DOUBLE NOT NULL, y DOUBLE NOT NULL, z DOUBLE NOT NULL,
-  o DOUBLE NULL,
-  rot0 DOUBLE NULL, rot1 DOUBLE NULL, rot2 DOUBLE NULL, rot3 DOUBLE NULL,
+  id        INT UNSIGNED      NOT NULL,
+  map       INT UNSIGNED      NOT NULL,
+  zoneId    SMALLINT UNSIGNED NULL,
+  areaId    SMALLINT UNSIGNED NULL,
+  phaseMask INT UNSIGNED      NULL,
+  position_x DOUBLE NOT NULL, position_y DOUBLE NOT NULL, position_z DOUBLE NOT NULL,
+  orientation DOUBLE NULL,
+  rotation0 DOUBLE NULL, rotation1 DOUBLE NULL, rotation2 DOUBLE NULL, rotation3 DOUBLE NULL,
   rot_variants   INT UNSIGNED NOT NULL,
   obs            BIGINT UNSIGNED NOT NULL,
   sniffs         BIGINT UNSIGNED NOT NULL,
   wotlk_sniffs   BIGINT UNSIGNED NOT NULL,
   tbc_sniffs     BIGINT UNSIGNED NOT NULL,
   classic_sniffs BIGINT UNSIGNED NOT NULL,
-  first_build INT NULL,
-  last_build  INT NULL,
+  VerifiedBuild  INT NULL,
+  last_build     INT NULL,
   first_seen_utc DATETIME(3) NULL,
-  PRIMARY KEY (entry, map, x, y, z),
-  KEY ix_pos (map, x, y)
+  PRIMARY KEY (id, map, position_x, position_y, position_z),
+  KEY ix_pos (map, position_x, position_y)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT INTO acore_world.sniff_gameobject_spawn
-SELECT p.entry, p.map, p.x, p.y, p.z,
-       r.o, r.rot0, r.rot1, r.rot2, r.rot3, p.rot_variants,
+SELECT p.id, p.map, a.zone_id, a.area_id, p.phaseMask,
+       p.px, p.py, p.pz,
+       r.o, r.rotation0, r.rotation1, r.rotation2, r.rotation3, p.rot_variants,
        p.obs, p.sniffs, p.wotlk_sniffs, p.tbc_sniffs, p.classic_sniffs,
-       p.first_build, p.last_build, p.first_seen_utc
+       p.verified_build, p.last_build, p.first_seen_utc
 FROM (
-    SELECT g.entry, g.map,
-           ROUND(g.position_x, 3) x, ROUND(g.position_y, 3) y, ROUND(g.position_z, 3) z,
+    SELECT g.entry AS id, g.map,
+           ROUND(g.position_x, 3) px, ROUND(g.position_y, 3) py, ROUND(g.position_z, 3) pz,
+           -- phase_mask is 1 on every ingest row - the parser derives no phasing at all - so
+           -- there is nothing here to take a commonest value of. MIN() and the mode agree.
+           MIN(g.phase_mask) phaseMask,
            COUNT(*) obs, COUNT(DISTINCT g.sniff_id) sniffs,
            COUNT(DISTINCT CASE WHEN s.branch = 'WotLK'   THEN g.sniff_id END) wotlk_sniffs,
            COUNT(DISTINCT CASE WHEN s.branch = 'TBC'     THEN g.sniff_id END) tbc_sniffs,
            COUNT(DISTINCT CASE WHEN s.branch = 'Classic' THEN g.sniff_id END) classic_sniffs,
-           MIN(s.client_build) first_build, MAX(s.client_build) last_build,
+           MIN(s.client_build) verified_build, MAX(s.client_build) last_build,
            MIN(g.first_seen_utc) first_seen_utc,
            COUNT(DISTINCT ROUND(g.rotation0, 4), ROUND(g.rotation1, 4),
                           ROUND(g.rotation2, 4), ROUND(g.rotation3, 4)) rot_variants
     FROM gameobject_spawn g
     JOIN sniff s ON s.id = g.sniff_id
-    GROUP BY g.entry, g.map, x, y, z
+    GROUP BY g.entry, g.map, px, py, pz
 ) p
 JOIN (
-    SELECT entry, map, x, y, z, o, rot0, rot1, rot2, rot3,
-           ROW_NUMBER() OVER (PARTITION BY entry, map, x, y, z ORDER BY seen DESC, rot0) rn
+    -- v groups the captures at a position by the rounded quaternion and keeps the id of one
+    -- row out of each group; the join back to gameobject_spawn reads that row's exact floats.
+    -- Aggregating the components themselves would be wrong even where it looks harmless: MIN()
+    -- per component can take x from one capture and w from another and hand back a quaternion
+    -- nobody ever sniffed.
+    SELECT v.entry, v.map, v.px, v.py, v.pz, v.o,
+           g.rotation0, g.rotation1, g.rotation2, g.rotation3,
+           ROW_NUMBER() OVER (PARTITION BY v.entry, v.map, v.px, v.py, v.pz
+                              ORDER BY v.seen DESC, v.k0) rn
     FROM (
         SELECT entry, map,
-               ROUND(position_x, 3) x, ROUND(position_y, 3) y, ROUND(position_z, 3) z,
-               ROUND(rotation0, 4) rot0, ROUND(rotation1, 4) rot1,
-               ROUND(rotation2, 4) rot2, ROUND(rotation3, 4) rot3,
-               MIN(orientation) o, COUNT(*) seen
+               ROUND(position_x, 3) px, ROUND(position_y, 3) py, ROUND(position_z, 3) pz,
+               ROUND(rotation0, 4) k0, ROUND(rotation1, 4) k1,
+               ROUND(rotation2, 4) k2, ROUND(rotation3, 4) k3,
+               MIN(orientation) o, COUNT(*) seen, MIN(id) rep_id
         FROM gameobject_spawn
-        GROUP BY entry, map, x, y, z, rot0, rot1, rot2, rot3
+        GROUP BY entry, map, px, py, pz, k0, k1, k2, k3
     ) v
-) r ON r.entry = p.entry AND r.map = p.map AND r.x = p.x AND r.y = p.y AND r.z = p.z
-   AND r.rn = 1;
+    JOIN gameobject_spawn g ON g.id = v.rep_id
+) r ON r.entry = p.id AND r.map = p.map
+   AND r.px = p.px AND r.py = p.py AND r.pz = p.pz
+   AND r.rn = 1
+-- The commonest zone and area seen at the position, taken as a PAIR so the two come from the
+-- same observations rather than being picked apart. Captures that recorded neither are excluded
+-- rather than allowed to win the vote, and the LEFT JOIN leaves a position NULL only when no
+-- capture of it knew either value.
+LEFT JOIN (
+    SELECT entry, map, px, py, pz, zone_id, area_id,
+           ROW_NUMBER() OVER (PARTITION BY entry, map, px, py, pz
+                              ORDER BY seen DESC, zone_id, area_id) rn
+    FROM (
+        SELECT entry, map,
+               ROUND(position_x, 3) px, ROUND(position_y, 3) py, ROUND(position_z, 3) pz,
+               zone_id, area_id, COUNT(*) seen
+        FROM gameobject_spawn
+        WHERE zone_id IS NOT NULL OR area_id IS NOT NULL
+        GROUP BY entry, map, px, py, pz, zone_id, area_id
+    ) w
+) a ON a.entry = p.id AND a.map = p.map
+   AND a.px = p.px AND a.py = p.py AND a.pz = p.pz
+   AND a.rn = 1;
 
 -- -------------------------------------------------------------------------------------------
 -- The pool view. This was a 105,526 row table until 2026-08-28; it is now a view over
@@ -386,10 +459,15 @@ SELECT r.map, r.x, r.y, r.z,
        MAX(CASE WHEN r.rn = 7 THEN r.entry END) AS e7,  MAX(CASE WHEN r.rn = 7 THEN r.pct END) AS pct7,
        MAX(CASE WHEN r.rn = 8 THEN r.entry END) AS e8,  MAX(CASE WHEN r.rn = 8 THEN r.pct END) AS pct8
 FROM (
-    SELECT map, x, y, z, entry, obs, sniffs, wotlk_sniffs, tbc_sniffs, classic_sniffs,
-           first_build, last_build,
-           ROUND(100.0 * obs / SUM(obs) OVER (PARTITION BY map, x, y, z), 2) AS pct,
-           ROW_NUMBER() OVER (PARTITION BY map, x, y, z ORDER BY obs DESC, entry) AS rn
+    -- The view keeps its own column names - x, y, z, entry, first_build. It is a pool shape
+    -- with no `gameobject` counterpart, so aliasing back is cheaper than breaking its readers.
+    SELECT map, position_x AS x, position_y AS y, position_z AS z, id AS entry,
+           obs, sniffs, wotlk_sniffs, tbc_sniffs, classic_sniffs,
+           VerifiedBuild AS first_build, last_build,
+           ROUND(100.0 * obs / SUM(obs)
+                 OVER (PARTITION BY map, position_x, position_y, position_z), 2) AS pct,
+           ROW_NUMBER() OVER (PARTITION BY map, position_x, position_y, position_z
+                              ORDER BY obs DESC, id) AS rn
     FROM acore_world.sniff_gameobject_spawn
 ) r
 LEFT JOIN acore_world.sniff_gameobject_point_sniffs c

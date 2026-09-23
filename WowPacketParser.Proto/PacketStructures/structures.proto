@@ -82,6 +82,8 @@ message PacketHolder {
       PacketAIReaction aiReaction = 46;
       PacketInitWorldStates initWorldStates = 47;
       PacketUpdateWorldState updateWorldState = 48;
+      PacketAttackerStateUpdate attackerStateUpdate = 49;
+      PacketLogXpGain logXpGain = 50;
   }
 }
 
@@ -198,6 +200,9 @@ message GossipMessageOption {
   bool boxCoded = 4;
   uint32 boxCost = 5;
   string boxText = 6;
+  // The option's own id, as the client sends it back in CMSG_GOSSIP_SELECT_OPTION.
+  // Only the builds that carry it set this; older ones leave it 0 and key on optionIndex.
+  int32 gossipOptionID = 7;
 }
 
 message GossipQuestOption {
@@ -267,6 +272,7 @@ message PacketSpellData {
   optional uint32 ammoInventoryType = 14;
   optional uint32 castCount = 15;
   optional float dstOrientation = 16;
+  optional uint32 dstMapId = 17;
 }
 
 message PacketSpellStart {
@@ -304,6 +310,8 @@ message PacketAuraUpdateEntry {
 message PacketAuraUpdate {
   UniversalGuid unit = 1;
   repeated PacketAuraUpdateEntry updates = 2;
+  // The list replaces every aura the unit had; slots it does not name are gone.
+  bool updateAll = 3;
 }
 
 message PacketAuraUpdateAll {
@@ -606,6 +614,26 @@ message UpdateValuesUnitDataFields {
   google.protobuf.Int32Value baseMana = 57;
   google.protobuf.Int32Value baseHealth = 58;
   optional UniversalGuid charmedBy = 59;
+  // The stat sheet. Sent only to whoever owns, charms or rides the unit, so for a creature it
+  // arrives from pets, guardians, vehicles and charmed mobs and from nothing else.
+  google.protobuf.FloatValue minDamage = 60;
+  google.protobuf.FloatValue maxDamage = 61;
+  google.protobuf.FloatValue minOffHandDamage = 62;
+  google.protobuf.FloatValue maxOffHandDamage = 63;
+  google.protobuf.FloatValue minRangedDamage = 64;
+  google.protobuf.FloatValue maxRangedDamage = 65;
+  google.protobuf.Int32Value attackPower = 66;
+  google.protobuf.Int32Value attackPowerModPos = 67;
+  google.protobuf.Int32Value attackPowerModNeg = 68;
+  google.protobuf.FloatValue attackPowerMultiplier = 69;
+  google.protobuf.Int32Value rangedAttackPower = 70;
+  google.protobuf.Int32Value rangedAttackPowerModPos = 71;
+  google.protobuf.Int32Value rangedAttackPowerModNeg = 72;
+  repeated Int32ValueWrapper stats = 73;
+  repeated Int32ValueWrapper statPosBuff = 74;
+  repeated Int32ValueWrapper statNegBuff = 75;
+  repeated Int32ValueWrapper resistanceBuffModsPositive = 76;
+  repeated Int32ValueWrapper resistanceBuffModsNegative = 77;
 }
  
 message UpdateValuesGameObjectDataFields
@@ -711,6 +739,10 @@ message CreateObject {
   google.protobuf.Int32Value textStartOffset = 9;
   google.protobuf.Int32Value textLength = 10;
   optional string text = 11;
+  // A creature created mid-spline, in the shape SMSG_ON_MONSTER_MOVE uses. It used to be put in
+  // the holder's own monsterMove, which shares the kind oneof with updateObject and so threw the
+  // whole packet's creates and updates away.
+  optional PacketMonsterMove spline = 12;
 }
 
 message UpdateObject {
@@ -919,4 +951,39 @@ message PacketUpdateWorldState {
 message WorldState {
   int32 id = 1;
   int32 value = 2;
+}
+
+// One melee swing, from SMSG_ATTACKER_STATE_UPDATE.
+message PacketAttackerStateUpdate {
+  UniversalGuid attacker = 1;
+  UniversalGuid victim = 2;
+  uint32 hitInfo = 3;
+  int32 damage = 4;
+  // Before armor and block: damage + absorbed + resisted + blocked + what armor took.
+  int32 originalDamage = 5;
+  int32 overDamage = 6;
+  repeated AttackSubDamage subDamages = 7;
+  uint32 victimState = 8;
+  int32 meleeSpellId = 9;
+  int32 blockAmount = 10;
+  // Only when HITINFO_UNK0 carries the server's debug block.
+  google.protobuf.Int32Value debugArmorReduction = 11;
+}
+
+message AttackSubDamage {
+  uint32 schoolMask = 1;
+  float floatDamage = 2;
+  int32 intDamage = 3;
+  int32 absorbed = 4;
+  int32 resisted = 5;
+}
+
+// Experience from SMSG_LOG_XP_GAIN. For a kill, amount is the XP before the rested bonus and
+// original the total the player received.
+message PacketLogXpGain {
+  UniversalGuid victim = 1;
+  int32 original = 2;
+  uint32 reason = 3;
+  int32 amount = 4;
+  float groupBonus = 5;
 }

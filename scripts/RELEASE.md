@@ -78,7 +78,7 @@ by filename, and a view must come after the tables it reads.
 | `sniff_loot` | view | the same rows with names filled in |
 | `sniff_loot_item` | 250,664 | long form - keeps the packet's slot number and the stack size |
 | `sniff_names` | 348,265 | Item, Unit and GameObject names |
-| `sniff_gameobject_spawn` | 132,101 | one row per gameobject **and** position - the import-shaped one |
+| `sniff_gameobject_spawn` | 142,271 | one row per gameobject **and** position - the import-shaped one |
 | `sniff_gameobject_point` | 105,526 | one row per **position**, listing what stood on it |
 | `sniff_reject` | 100 | loots left out, and why |
 
@@ -131,18 +131,33 @@ uses. That table has no player names in it at all.
 
 Both tables group on the position rounded to a millimetre. A gameobject never moves, so every
 capture reads the same server-side row; anything differing past three decimals is float
-serialisation, not a second spawn. 1,929,306 observations collapse to 132,101 spawns on 105,526
+serialisation, not a second spawn. 2,227,881 observations collapse to 142,271 spawns on 113,326
 distinct positions.
 
-**`sniff_gameobject_spawn`** is the one to import from. Per entry and position, it carries `o` and the full
-rotation quaternion `rot0`..`rot3` - the fields AzerothCore's `gameobject` table wants - plus
-`first_build` and `last_build`, the earliest and latest client that saw it.
+**`sniff_gameobject_spawn`** is the one to import from, and since 2026-09-21 its columns are
+spelled the way AzerothCore spells them: `id`, `map`, `zoneId`, `areaId`, `phaseMask`,
+`position_x`/`position_y`/`position_z`, `orientation`, `rotation0`..`rotation3` and
+`VerifiedBuild`. An import is a SELECT with no aliasing. They were `entry`, `x`/`y`/`z`, `o`,
+`rot0`..`rot3` and `first_build` before that date, so anything written against the old bundle
+needs updating. `last_build` keeps its name beside `VerifiedBuild`, which holds the **earliest**
+client that saw the row rather than the latest - "known good at least since", not AzerothCore's
+own convention for that column.
 
-Rotation is the **commonest** quaternion captured, never an average; a component-wise mean of
-four rotations is not a rotation. `rot_variants` says how many distinct ones were seen there.
-It is 1 for 131,944 of the 132,101 spawns. The 157 that disagree are all transient objects -
-Blaze, Noblegarden eggs, summoner visuals - genuinely different objects landing on one
-coordinate. Treat `rot_variants > 1` as "this spot gets reused", not as a rotation to import.
+Two of the AzerothCore-named columns are weaker than the rest. `zoneId` and `areaId` are the
+commonest values the sniffers recorded at that position, and the parser reads those from where
+the **sniffing player** was standing, not from the object - usually the same place, but not at a
+zone border. `phaseMask` is 1 everywhere, because no phase heuristic is implemented at all. Both
+are there so the insert is literal; neither is evidence.
+
+Rotation is the quaternion of **one real observation**, never an average; a component-wise mean
+of four rotations is not a rotation. The commonest quaternion at the spot is chosen by rounding
+to four decimals, and then the exact float is published - before 2026-09-21 the rounded value was
+published instead, which cut every component to four decimals and flattened small ones to zero.
+The client sends floats, so the exact float is as precise as this gets. `rot_variants` says how
+many distinct rotations were seen there. It is 1 for 142,032 of the 142,271 spawns. The 239 that
+disagree are all transient objects - Blaze, Noblegarden eggs, summoner visuals - genuinely
+different objects landing on one coordinate. Treat `rot_variants > 1` as "this spot gets reused",
+not as a rotation to import.
 
 **`sniff_gameobject_point`** exists because one spawn point often hosts several different gameobjects, and
 that is a pool you cannot see from a per-entry table. `e1`..`e8` are the entries seen there,

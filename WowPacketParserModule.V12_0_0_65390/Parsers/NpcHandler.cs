@@ -108,6 +108,7 @@ namespace WowPacketParserModule.V12_0_0_65390.Parsers
                 BoxCoded = gossipOption.BoxCoded.GetValueOrDefault(),
                 BoxCost = (uint)gossipOption.BoxMoney,
                 OptionIndex = gossipOption.OptionID.GetValueOrDefault(),
+                GossipOptionID = gossipOption.GossipOptionID.GetValueOrDefault(),
                 Text = gossipOption.OptionText,
                 BoxText = gossipOption.BoxText
             };

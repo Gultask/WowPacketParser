@@ -11,7 +11,13 @@
     the whole of sniff-storage can be processed without needing 79 GB of free space.
 
     Files already in the sniff table are skipped by content hash, so the run can be stopped and
-    restarted without redoing work. Everything is logged with timestamps.
+    restarted without redoing work. An archive is listed before it is opened: 7-Zip's listing
+    carries every member's CRC-32 and size without unpacking anything, and an archive whose
+    sniffs all match the sniff table's file_crc32 and file_size is passed over whole. Archives
+    inside archives have no row of their own, so each one that finishes cleanly is noted in
+    ingest_archive under the CRC its parent lists it with. Everything is logged with timestamps.
+
+    Split archives are opened from their first volume (.001); 7-Zip reads the rest itself.
 
 .EXAMPLE
     .\ingest-sniffs.ps1
@@ -56,12 +62,26 @@ param(
     # Skip sniffs showing a world newer than this without parsing them, e.g. 'WrathOfTheLichKing'
     # to keep everything up to and including Wrath Classic 3.4.x. Compares content rather than
     # build numbers, so Burning Crusade Classic is kept despite its very high build.
+    #
+    # Prefer -MapPolicy for a WotLK-and-below corpus: this drops whole sniffs, while the map
+    # policy keeps the parts of a Cataclysm or Shadowlands capture that stand on ground a 3.3.5
+    # server still has - Outland, Northrend, and every dungeon those expansions did not rebuild.
     [string] $MaxContentExpansion = '',
 
-    # Parser worker threads; 0 means one per core. The work is not CPU parallel bound - two
-    # threads finish within about a tenth of the time all twelve do - so capping this leaves the
-    # machine usable for other things at almost no cost to throughput.
-    [int] $Threads = 0,
+    # Drop packets by the map the client was standing on, before they are parsed. 'wotlk' keeps
+    # only maps that exist in 3.3.5a Map.dbc, which is what makes a Cata+ corpus affordable: a
+    # 4.4.1 capture measured 93.2% of its packets inside Firelands, a map no WotLK server has.
+    [ValidateSet('', 'none', 'wotlk')]
+    [string] $MapPolicy = '',
+
+    # Extra map ids to drop on top of the policy, comma separated.
+    [string] $MapDeny = '',
+
+    # Parser worker threads; 0 means one per core. Leave it at 1. Collectors that read the
+    # parser's Storage depend on the order packets were parsed in, and with more than one thread
+    # creature auras, spawn areas and gameobject phases came out different on every run. The
+    # database writes are the bottleneck anyway: five samples took 41 s on 1 thread, 40-42 s on 4.
+    [int] $Threads = 1,
 
     # Regex matched against the file name. Instance sniffs are the expensive ones - a handful of
     # raid logs carry roughly a third of the corpus's packets while holding under a tenth of its
@@ -99,8 +119,13 @@ if ($ExcludeListFile) {
 }
 
 $script:Stats = [ordered]@{
-    Found = 0; Skipped = 0; Ingested = 0; Failed = 0; ArchivesOpened = 0; Excluded = 0
+    Found = 0; Skipped = 0; Ingested = 0; Failed = 0; ArchivesOpened = 0; ArchivesSkipped = 0; Excluded = 0
 }
+
+$script:SniffExtensions = @('.pkt', '.bin')
+$script:ArchiveExtensions = @('.7z', '.rar', '.zip', '.001')
+# 'crc:size' of every sniff and nested archive already in the database, from Get-KnownCopies.
+$script:KnownCopies = @{}
 
 function Write-Log {
     param([string] $Message, [string] $Level = 'INFO')
@@ -136,15 +161,135 @@ function Get-IngestedHashes {
     return $known
 }
 
+function Invoke-MySql {
+    param([string] $Query)
+    try {
+        $env:MYSQL_PWD = $DbPassword
+        $rows = & $MySql "-u$DbUser" -N -B -e $Query 2>$null
+        if ($LASTEXITCODE -ne 0) { return $null }
+        return @($rows)
+    }
+    finally {
+        Remove-Item Env:\MYSQL_PWD -ErrorAction SilentlyContinue
+    }
+}
+
+# Every sniff and nested archive already in the database, as 'crc:size', so an archive can be
+# checked from its listing. Sniffs ingested before the parser recorded a CRC have none and
+# simply cost an extraction, as they always did.
+function Get-KnownCopies {
+    if ($Force -or -not (Test-Path $MySql)) { return }
+
+    [void] (Invoke-MySql ("CREATE TABLE IF NOT EXISTS ``$Database``.``ingest_archive`` (" +
+        "``crc32`` CHAR(8) NOT NULL, ``size`` BIGINT UNSIGNED NOT NULL, ``name`` VARCHAR(512) NOT NULL, " +
+        "``done_utc`` DATETIME NOT NULL, PRIMARY KEY (``crc32``, ``size``)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 " +
+        "COMMENT='Archives found inside other archives whose sniffs were all ingested, keyed as their parent lists them; " +
+        "written by ingest-sniffs.ps1 so a restart can pass over the parent unopened.';"))
+
+    $sniffs = Invoke-MySql "SELECT LOWER(file_crc32), file_size FROM ``$Database``.``sniff`` WHERE file_crc32 IS NOT NULL;"
+    $archives = Invoke-MySql "SELECT LOWER(crc32), size FROM ``$Database``.``ingest_archive``;"
+    foreach ($row in @($sniffs) + @($archives)) {
+        if (-not $row) { continue }
+        $crc, $size = $row -split "`t"
+        $script:KnownCopies["${crc}:$size"] = $true
+    }
+    Write-Log "$(@($sniffs).Count) sniffs and $(@($archives).Count) nested archives known by CRC"
+}
+
+# The archive's members from 7-Zip's listing, which reads headers only. $null when 7-Zip cannot
+# list it; the archive is then opened as before.
+function Get-ArchiveMembers {
+    param([string] $Archive)
+
+    $lines = & $SevenZip l -slt -- $Archive 2>$null
+    if ($LASTEXITCODE -ne 0) { return $null }
+
+    $members = New-Object System.Collections.ArrayList
+    $inList = $false
+    $current = $null
+    foreach ($line in $lines) {
+        if ($line -eq '----------') { $inList = $true; continue }
+        if (-not $inList) { continue }
+        if ($line -match '^Path = (.*)$') {
+            if ($current) { [void] $members.Add($current) }
+            $current = @{ Path = $Matches[1]; Size = ''; Crc = ''; Folder = $false }
+        }
+        elseif ($current -and $line -match '^Size = (\d*)$') { $current.Size = $Matches[1] }
+        elseif ($current -and $line -match '^CRC = ([0-9A-Fa-f]*)$') { $current.Crc = $Matches[1].ToLowerInvariant() }
+        elseif ($current -and ($line -eq 'Folder = +' -or $line -match '^Attributes = D')) { $current.Folder = $true }
+    }
+    if ($current) { [void] $members.Add($current) }
+    return , $members
+}
+
+# Reads back which of these members now have a sniff row, after the parser has had them.
+function Update-KnownCopies {
+    param($Members)
+    $crcs = @($Members | Where-Object { $_.Crc -and $script:SniffExtensions -contains [IO.Path]::GetExtension($_.Path).ToLowerInvariant() } |
+              ForEach-Object { "'$($_.Crc)'" })
+    if ($crcs.Count -eq 0) { return }
+    $rows = Invoke-MySql ("SELECT LOWER(file_crc32), file_size FROM ``$Database``.``sniff`` " +
+                          "WHERE file_crc32 IN ($($crcs -join ','));")
+    foreach ($row in @($rows)) {
+        if (-not $row) { continue }
+        $crc, $size = $row -split "`t"
+        $script:KnownCopies["${crc}:$size"] = $true
+    }
+}
+
+function Add-KnownArchive {
+    param([string] $Identity, [string] $Name)
+    if ($script:KnownCopies.ContainsKey($Identity)) { return }
+    $crc, $size = $Identity -split ':'
+    $slash = [string][char]92
+    $escaped = $Name.Replace($slash, $slash + $slash).Replace("'", "''")
+    [void] (Invoke-MySql ("INSERT IGNORE INTO ``$Database``.``ingest_archive`` " +
+                          "VALUES ('$crc', $size, '$escaped', UTC_TIMESTAMP());"))
+    $script:KnownCopies[$Identity] = $true
+}
+
+function Test-Excluded {
+    param([string] $Name)
+    if ($ExcludePattern -and $Name -match $ExcludePattern) { return $true }
+    return $script:ExcludeNames.ContainsKey($Name) -or
+           $script:ExcludeNames.ContainsKey([IO.Path]::GetFileNameWithoutExtension($Name))
+}
+
+# True when every sniff and nested archive in the listing is already in the database, so the
+# archive holds nothing to do. Members that are neither - text files, SQL, screenshots - do not
+# count, and an excluded sniff counts as done.
+function Test-ArchiveDone {
+    param($Members)
+
+    $any = $false
+    foreach ($m in $Members) {
+        if ($m.Folder) { continue }
+        $name = Split-Path -Leaf $m.Path
+        $ext = [IO.Path]::GetExtension($name).ToLowerInvariant()
+        if ($ext -eq '.gz') { return $false }
+        if ($script:SniffExtensions -notcontains $ext -and $script:ArchiveExtensions -notcontains $ext) { continue }
+        if ($script:SniffExtensions -contains $ext -and (Test-Excluded $name)) { continue }
+        if (-not $m.Crc -or -not $script:KnownCopies.ContainsKey("$($m.Crc):$($m.Size)")) { return $false }
+        $any = $true
+    }
+    return $any -or $Members.Count -gt 0
+}
+
 function Invoke-Parser {
     param([string[]] $Files)
 
     if ($Files.Count -eq 0) { return }
 
     if ($PSCmdlet.ShouldProcess("$($Files.Count) sniff(s)", 'parse into the ingest database')) {
-        $arguments = @('--DumpFormat', '17')
+        $arguments = @('--DumpFormat', '17', '--IngestDatabase', $Database)
         if ($MaxContentExpansion) {
             $arguments += @('--IngestMaxContentExpansion', $MaxContentExpansion)
+        }
+        if ($MapPolicy) {
+            $arguments += @('--IngestMapPolicy', $MapPolicy)
+        }
+        if ($MapDeny) {
+            $arguments += @('--IngestMapDeny', $MapDeny)
         }
         if ($Threads -gt 0) {
             $arguments += @('--Threads', $Threads)
@@ -155,7 +300,7 @@ function Invoke-Parser {
             $text = "$item"
             # The parser prints a progress fraction per packet; only keep the lines that matter.
             # 'tried to overwrite delegate' is long standing parser noise on Classic builds.
-            if ($text -match 'Recorded as sniff|spawns recorded|waypoints recorded|loot instances recorded|no loot -|Skipped -|WARNING|Could not|rror' -and
+            if ($text -match 'Recorded as sniff|recorded|map gate|no loot -|Skipped -|WARNING|Could not|rror' -and
                 $text -notmatch 'tried to overwrite delegate') {
                 Write-Log $text.Trim()
             }
@@ -174,7 +319,8 @@ function Invoke-Parser {
 function Get-Sniffs {
     param([string] $Root)
 
-    $wanted = '.pkt', '.bin', '.gz', '.7z', '.rar', '.zip'
+    # .001 is the first volume of a split archive; 7-Zip finds .002 onwards by itself.
+    $wanted = '.pkt', '.bin', '.gz', '.7z', '.rar', '.zip', '.001'
     if (Test-Path -LiteralPath $Root -PathType Leaf) {
         return @(Get-Item -LiteralPath $Root)
     }
@@ -235,7 +381,9 @@ function Add-Pending {
 }
 
 function Invoke-Path {
-    param([string] $Root, [hashtable] $Known, [System.Collections.ArrayList] $Pending, [int] $Depth = 0)
+    param([string] $Root, [hashtable] $Known, [System.Collections.ArrayList] $Pending, [int] $Depth = 0,
+          # Inside an extracted archive: member path -> 'crc:size' from the parent's listing.
+          [hashtable] $Listed = @{})
 
     if ($Depth -gt 4) {
         Write-Log "Archive nesting deeper than 4 at $Root - not descending further" 'WARN'
@@ -244,19 +392,50 @@ function Invoke-Path {
 
     foreach ($file in Get-Sniffs -Root $Root) {
         switch -Regex ($file.Extension) {
-            '^\.(7z|rar|zip)$' {
+            '^\.(7z|rar|zip|001)$' {
+                $identity = $null
+                if ($Listed.Count -gt 0) {
+                    $relative = $file.FullName.Substring($Root.TrimEnd([char]92).Length + 1)
+                    $identity = $Listed[$relative.ToLowerInvariant()]
+                }
+
+                $members = if ($Force) { $null } else { Get-ArchiveMembers -Archive $file.FullName }
+                if ($null -ne $members -and (Test-ArchiveDone -Members $members)) {
+                    $script:Stats.ArchivesSkipped++
+                    Write-Verbose "already ingested, not opened: $($file.Name)"
+                    if ($identity -and -not $WhatIfPreference) { Add-KnownArchive -Identity $identity -Name $file.Name }
+                    continue
+                }
+                $children = @{}
+                foreach ($m in @($members)) {
+                    if ($m -and $m.Crc) { $children[$m.Path.ToLowerInvariant()] = "$($m.Crc):$($m.Size)" }
+                }
+
                 # Some of these are zipped twice, so recurse rather than assuming one level.
                 $temp = Join-Path ([System.IO.Path]::GetTempPath()) ("wpp-ingest-" + [guid]::NewGuid().ToString('N'))
                 New-Item -ItemType Directory -Path $temp -Force | Out-Null
+                $failedBefore = $script:Stats.Failed
                 try {
                     Write-Log "opening $($file.Name)"
                     if (Expand-Archive7z -Archive $file.FullName -Destination $temp) {
                         $script:Stats.ArchivesOpened++
-                        Invoke-Path -Root $temp -Known $Known -Pending $Pending -Depth ($Depth + 1)
+                        Invoke-Path -Root $temp -Known $Known -Pending $Pending -Depth ($Depth + 1) -Listed $children
                         # Anything still queued refers to files inside this temp folder.
                         if ($Pending.Count -gt 0) {
                             Invoke-Parser -Files $Pending.ToArray()
                             $Pending.Clear()
+                        }
+
+                        # An archive inside an archive has no sniff row to be recognised by, so it
+                        # is noted under the CRC its parent lists it with - once every sniff in it
+                        # has a row. The parser exits 0 on a build it cannot read, so its exit code
+                        # alone would mark an archive done that never went in.
+                        if ($identity -and $null -ne $members -and -not $WhatIfPreference) {
+                            Update-KnownCopies -Members $members
+                        }
+                        if ($identity -and $null -ne $members -and -not $WhatIfPreference -and
+                            $script:Stats.Failed -eq $failedBefore -and (Test-ArchiveDone -Members $members)) {
+                            Add-KnownArchive -Identity $identity -Name $file.Name
                         }
                     }
                 }
@@ -313,6 +492,8 @@ catch {
 Write-Log "parser   : $Parser"
 Write-Log "database : $Database"
 if ($MaxContentExpansion) { Write-Log "cutoff   : $MaxContentExpansion and older" }
+if ($MapPolicy) { Write-Log "map gate : $MapPolicy" }
+if ($MapDeny) { Write-Log "map deny : $MapDeny" }
 if ($Threads -gt 0) { Write-Log "threads  : $Threads" }
 if ($ExcludePattern) { Write-Log "exclude  : /$ExcludePattern/" }
 if ($ExcludeListFile) { Write-Log "exclude  : $($script:ExcludeNames.Count / 2) names from $ExcludeListFile" }
@@ -342,6 +523,7 @@ Write-Log "paths    : $($Path -join '; ')"
 
 $started = Get-Date
 $known = Get-IngestedHashes
+Get-KnownCopies
 $pending = New-Object System.Collections.ArrayList
 
 foreach ($root in $Path) {
@@ -360,10 +542,10 @@ if ($pending.Count -gt 0) {
 
 $elapsed = (Get-Date) - $started
 Write-Log "=== finished in $($elapsed.ToString('hh\:mm\:ss')) ==="
-Write-Log ("found {0}, ingested {1}, skipped {2}, failed {3}, excluded {4}, archives opened {5}" -f `
+Write-Log ("found {0}, ingested {1}, skipped {2}, failed {3}, excluded {4}, archives opened {5}, archives already done {6}" -f `
     $script:Stats.Found, $script:Stats.Ingested, $script:Stats.Skipped, $script:Stats.Failed, `
-    $script:Stats.Excluded, $script:Stats.ArchivesOpened)
-if ($script:Stats.Found -eq 0) {
+    $script:Stats.Excluded, $script:Stats.ArchivesOpened, $script:Stats.ArchivesSkipped)
+if ($script:Stats.Found -eq 0 -and $script:Stats.ArchivesSkipped -eq 0) {
     Write-Log "no sniff files were found in any of the given paths - nothing was ingested" 'ERROR'
 }
 Write-Log "log written to $LogFile"

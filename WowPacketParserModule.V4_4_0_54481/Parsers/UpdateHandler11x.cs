@@ -163,7 +163,7 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
             WoWObject obj = CoreParsers.UpdateHandler.CreateObject(objType, guid, map, packet);
 
             obj.CreateType = createType;
-            obj.Movement = ReadMovementUpdateBlock(packet, guid, obj, index);
+            obj.Movement = ReadMovementUpdateBlock(packet, createObject, guid, obj, index);
 
             createObject.Values.Fields = new();
             var updatefieldSize = packet.ReadUInt32();
@@ -197,11 +197,11 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
                         break;
                     }
                     case ObjectType.Player:
-                        handler.ReadCreateUnitData(fieldsData, flags, index);
+                        createObject.Values.Fields.UpdateData(handler.ReadCreateUnitData(fieldsData, flags, index));
                         handler.ReadCreatePlayerData(fieldsData, flags, index);
                         break;
                     case ObjectType.ActivePlayer:
-                        handler.ReadCreateUnitData(fieldsData, flags, index);
+                        createObject.Values.Fields.UpdateData(handler.ReadCreateUnitData(fieldsData, flags, index));
                         handler.ReadCreatePlayerData(fieldsData, flags, index);
                         handler.ReadCreateActivePlayerData(fieldsData, flags, index);
                         break;
@@ -258,7 +258,7 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
             WoWObject obj = CoreParsers.UpdateHandler.CreateObject(objType, guid, map, packet);
 
             obj.CreateType = createType;
-            obj.Movement = ReadMovementUpdateBlock(packet, guid, obj, index);
+            obj.Movement = ReadMovementUpdateBlock(packet, createObject, guid, obj, index);
 
             createObject.Values.Fields = new();
             var updatefieldSize = packet.ReadUInt32();
@@ -297,11 +297,11 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
                                 break;
                             }
                             case ObjectType.Player:
-                                handler.ReadCreateUnitData(fieldsData, flags, index);
+                                createObject.Values.Fields.UpdateData(handler.ReadCreateUnitData(fieldsData, flags, index));
                                 handler.ReadCreatePlayerData(fieldsData, flags, index);
                                 break;
                             case ObjectType.ActivePlayer:
-                                handler.ReadCreateUnitData(fieldsData, flags, index);
+                                createObject.Values.Fields.UpdateData(handler.ReadCreateUnitData(fieldsData, flags, index));
                                 handler.ReadCreatePlayerData(fieldsData, flags, index);
                                 handler.ReadCreateActivePlayerData(fieldsData, flags, index);
                                 break;
@@ -556,7 +556,7 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
             return (float)ang;
         }
 
-        private static MovementInfo ReadMovementUpdateBlock(Packet packet, WowGuid guid, WoWObject obj, object index)
+        private static MovementInfo ReadMovementUpdateBlock(Packet packet, CreateObject createObject, WowGuid guid, WoWObject obj, object index)
         {
             var moveInfo = new MovementInfo();
 
@@ -712,7 +712,7 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
 
                 if (moveInfo.HasSplineData)
                 {
-                    PacketMonsterMove monsterMove = packet.Holder.MonsterMove = new();
+                    PacketMonsterMove monsterMove = createObject.Spline = new() { CreationSpline = true };
                     monsterMove.Mover = moverGuid;
                     packet.ResetBitReader();
                     packet.ReadInt32("ID", index);

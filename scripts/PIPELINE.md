@@ -15,6 +15,12 @@ belongs in a script before the session ends, because a year from now nobody will
   ingest-sniffs.ps1        .pkt / .7z  ->  wpp_ingest              hours to days
         |
         v
+  recover-co2.sql          rebuilds create_type for silent clients          ~1 min
+        |
+        v
+  roll-up-tables.sql       the eleven tables that had no digest              ~1 min
+        |
+        v
   mine-paths.sh            creature_waypoint -> path_summary, path_point   ~1 h 35 m
         |
         v
@@ -28,11 +34,15 @@ belongs in a script before the session ends, because a year from now nobody will
   make-release.sh          -> 9 per-table files, into the module tree   ~1 min 20 s
 ```
 
-The two arrows that matter:
+The three arrows that matter:
 
 - **`mine-paths.sh` must run before `build-digest.sql`.** The digest reads `path_point` twice:
   phase 4c decides whether a spawn patrols by how near it sits to a route, and phase 6 copies
   the routes across. Run them the other way round and both describe the previous mining.
+- **`recover-co2.sql` must run before `build-digest.sql`.** It edits `creature_spawn.create_type`
+  in place, and the digest reads that column to choose both the published position and the
+  accuracy. Run it after the digest and the corpus is right while everything published from it
+  is a round behind.
 - **`publish-loot.sql` is independent.** It reads `loot_instance` and `gameobject_spawn` and
   touches nothing the digest uses, so it can run whenever.
 
@@ -41,7 +51,7 @@ The two arrows that matter:
 ### 1. Ingest
 
 ```
-.\ingest-sniffs.ps1 -Path 'G:\sniff-storage' -LogFile 'G:\ingest.log'
+.\ingest-sniffs.ps1 -Path 'G:\sniff-storage' -Database wpp_ingest -MapPolicy wotlk -LogFile 'G:\ingest.log'
 ```
 
 Walks folders for `.pkt` and archives, runs WowPacketParser with DumpFormat 17 (straight to
@@ -49,7 +59,184 @@ MySQL, no intermediate files), extracting one archive at a time so the whole sto
 79 GB free. Sniffs already loaded are skipped by content hash, so it is safe to stop and restart.
 
 `-MaxContentExpansion` filters by content rather than build number, because Burning Crusade
-Classic carries a very high build.
+Classic carries a very high build. It drops whole sniffs, so prefer `-MapPolicy` for a
+WotLK-and-below corpus: that keeps the parts of a Cataclysm or Shadowlands capture standing on
+ground a 3.3.5 server still has, and throws away only the rest.
+
+#### The map gate is what makes Cataclysm and later affordable
+
+`-MapPolicy wotlk` keeps a map only if **both** are true: it is present in 3.3.5a `Map.dbc`
+(read out of a client install, because AzerothCore ships `map_dbc` empty), and the sniff's own
+branch is early enough that it is looking at the 3.3.5 version of it. Everything else never
+reaches a handler.
+
+The second half is not optional, and leaving it out was a real bug. Kalimdor is map 1 in 3.3.5
+and map 1 in Cataclysm, and they are not the same Kalimdor. A gate that only asked whether the
+map id existed let a 4.4.0 levelling capture through: **320,000 packets, 3,741 spawns and 51,264
+waypoints of rebuilt Kalimdor**, plus its rewritten gossip text. The rule is the same one
+`map_validity` states - one is about cost and the other about what may be used, and both want
+the same answer - so the gate now applies it directly. Thirteen maps have a cut-off: 0, 1, 33,
+36, 109, 309 and 568 stop being 3.3.5 after Cataclysm; 189, 289 and 389 after Mists; 47, 48 and
+229 after Warlords. MoP is the latest cut-off expressible, because `ClientBranch` stops there
+and files everything from Warlords on under `Retail` - enough for every rebuild known to need
+gating.
+
+With that in, the 4.4.1 capture measured above goes from 93.2% dropped to **100.0%** - it only
+ever stood on Firelands and rebuilt old world, so it has nothing to give a 3.3.5 server. A 3.4.3
+WotLK capture is still untouched, keeping all eight of its maps including 0 and 1.
+
+The numbers that forced it, measured on the 3,101 sniff corpus:
+
+| | sniffs | packets |
+|---|---:|---:|
+| touch only instance maps | 19 | 350,939 |
+| mix world and instance | 667 | 553,722,129 |
+
+Only 19 sniffs are pure instance content, so **excluding by file name is worth nothing** - but
+the mixed ones hold **71.7% of the whole corpus by packet count**. The saving has to come from
+inside the file or not at all. Measured per sniff afterwards:
+
+| capture | dropped | maps |
+|---|---:|---|
+| 4.4.1 Cata Classic | 100.0% (2,842,004 of 2,842,330) | Firelands (720), rebuilt 0/1/36 |
+| 9.0.2 Castle Nathria | 100.0% (720,704 of 720,807) | 2296, 2222 |
+| 3.4.3 WotLK Classic | 0% | every map it visited exists in 3.3.5 |
+
+That last row is the point: the gate is a no-op on the branches already being ingested, so it
+cannot disturb them.
+
+**How it works.** A capture is a linked list, not an array - records are variable length, so
+there is no seeking to packet N. But the map changes only a couple of dozen times in a
+multi-hour capture (38 map-defining packets in 2.8M), so those three opcodes are parsed in file
+order on the reader thread and every other packet is stamped with the map in force when it
+arrived. `Settings.MapFilters` is a different thing entirely: it drops rows on the way out of
+the SQL builders, after everything has already been parsed, and saves no time.
+
+**What is never gated.** Opcodes whose handler advances the per-connection zlib stream, because
+skipping one desynchronises it and would quietly corrupt every compressed packet after it -
+including the ones on the maps being kept. They cost nothing: a 2.8M packet 4.4.1 capture holds
+none of them at all.
+
+**Where it does not fire.** Classic Era 1.15.x resolves no map, so nothing is gated on those
+sniffs. That is the safe failure - it parses everything rather than dropping the wrong thing -
+and it costs nothing here, because every Classic Era map exists in 3.3.5 anyway. `sniff_map`
+records the packet census per map, so a build where the gate silently stops working shows up as
+a sniff with no attributed packets.
+
+**Gating is not the same as validity.** The gate is about cost; `map_validity` is about whether
+the data can be used. It now covers all 135 maps: a map is usable from the branch of the
+expansion that introduced it onward, until something rebuilt its terrain. Cataclysm reshaped the
+old world plus Deadmines, Shadowfang Keep, Zul'Gurub, Zul'Aman and the Sunken Temple; Mists
+rebuilt Scarlet Monastery, Scholomance and Ragefire Chasm; Warlords did Blackrock Spire,
+Blackfathom Deeps and Razorfen Kraul. Everything else took minor adjustments at most - which is
+why a Cataclysm capture of UBRS or Zul'Farrak, or a Shadowlands one of Outland, is good evidence
+for 3.3.5, and a Cataclysm capture of Deadmines is not.
+
+Map 229 is Lower and Upper Blackrock Spire under one id and Warlords rebuilt only the upper
+half, so the whole map is cut at MoP; the Cataclysm UBRS captures are still kept, which is where
+that evidence comes from.
+
+#### What one sniff now yields
+
+Beyond spawns, waypoints and loot: `creature_spell_cast` (every SMSG_SPELL_START by a creature,
+raw), `spell_target`, `spell_destination`, `creature_equip`, `gossip_menu`,
+`gossip_menu_option`, `npc_text`, `areatrigger_teleport`, `npc_vendor`, `npc_spellclick`,
+`creature_template_spell`, `creature_quest_item`, `creature_gossip`, `creature_value`,
+`creature_aggro`, `gameobject_template`, `gameobject_quest_item`, `trainer`, `npc_trainer`,
+`gossip_poi`, `quest_poi` and `quest_poi_point`. Creature auras are no longer collected.
+
+Run `entry-values.sql` afterwards to roll the per-guid values up to the entry - `entry_value`,
+`entry_value_best` - and to derive initial cast timers from the pulls. It also strips the runtime
+bits out of `unit_flags` on the way through; see `TABLES.md`.
+
+```
+mysql -u root -p wpp_ingest < entry-values.sql
+```
+
+**A trap worth knowing about.** Most of those last six read from `Storage` bags that the parser
+switches off unless their `SQLOutput` flag is set - `StoreBag.Add` is a no-op when disabled - and
+the ingest sets none of them, so the bags were silently empty. Database mode now turns on exactly
+the outputs its collectors read (`creature_template`, `creature_template_gossip`,
+`creature_spell_list`, `npc_vendor`, `npc_spellclick_spells`, `gameobject_template`,
+`npc_trainer`, `trainer`, `points_of_interest`, `quest_poi`, `quest_poi_points`) and no more, because enabling the
+lot would collect quest, item and hotfix data nothing here reads.
+
+**And a second one.** `creature_template_spell` is the action bar the server sends for a
+controlled creature, and three branches spell it three ways: WotLK Classic fills
+`CreatureTemplateSpells`, Cata Classic fills `CreatureSpellLists`, and the legacy handler fills
+`SpellsX`. The collector reads all three. Reading one would have returned nothing for two thirds
+of the corpus while looking like it worked.
+
+`scripts/TABLES.md` says what each
+one holds and which of the old database's 53 tables are worth keeping.
+
+Loot refuses to run on Mists and later: area looting lets one response cover several corpses, so
+the collector's one-loot-per-owner model does not hold and it would record confident nonsense.
+The `sniff_coverage` row says so rather than leaving a silent zero. Cataclysm loot parses fine -
+verified on 4.4.1, which reports `empty` rather than `unsupported`.
+
+### 1b. Recover the CreateObject2 flag
+
+```
+mysql -u root -p wpp_ingest < recover-co2.sql
+```
+
+Run this after every ingest, before anything reads `creature_spawn`. It is fast and it is a
+no-op when there is nothing to fix.
+
+The Anniversary client line - TBC 2.5.5 / 2.5.6, builds 65417 and up - does not send
+`UpdateType 2` at all, so every spawn arrives as CreateObject1. That was worth 258,230 spawn
+rows and 149,528 gameobject rows across 182 sniffs with not one CO2 among them, including whole
+zones captured deliberately for their spawn points. The parser was reading the byte correctly;
+the client had stopped sending it. Confirmed by the fact that `GetVersionDefiningBuild` routes
+those builds to the same module as MoP Classic, which still produces CO2 at build 64857 through
+that identical code path.
+
+`WowPacketParserModule.V5_5_0_61735/Parsers/UpdateHandler.cs` now carries the same
+`TreatAsCreateObject2` reconstruction that upstream added to V11 and V12, gated on build 65417
+so MoP Classic keeps its real flag. **That fixes new ingests only** - this script is what fixes
+sniffs already in the corpus, and the two agree because both read
+`TreatAsCreateObject2Tolerance`, set to 2 in `App.config`.
+
+It picks its targets by client build, never by individual sniff: a build qualifies on having a
+thousand-plus spawn rows and exactly zero CO2, then is remembered in `co2_recovered_build` so
+later sniffs on the same build are caught too. Do not be tempted to widen this to "any sniff
+with no CO2" - 244 sniffs here have 200+ spawn rows and no CO2 for the ordinary reason that
+nothing respawned in view, and most of them are WotLK, where capture works fine.
+
+Every changed row is listed in `co2_recovered` first, so it is reversible. The script's header
+carries the validation and the tolerance table.
+
+### 1c. Roll up the tables that had no digest
+
+```
+mysql -u root -p wpp_ingest < roll-up-tables.sql
+```
+
+Eleven parser-written tables were read by no script at all - collected on every ingest, 4.2M
+rows, about 860 MB, never turned into an answer. Most needed no inference, only the sniff
+dimension collapsed and the observations counted, so `roll-up-tables.sql` does that and keeps a
+`sniffs` column throughout: one capture seeing a thing ten times is far weaker evidence than ten
+captures seeing it once, and a bare `DISTINCT` throws exactly that away.
+
+Two of its outputs are gates rather than rollups, and both are argued in the script header:
+
+- **`entry_spell_target`** drops the 94.6% of `spell_target` whose spell has no entry-based
+  implicit target in Spell.dbc. 2,052,019 rows become 59,832. Spells absent from 3.3.5 Spell.dbc
+  are kept and marked `unknown_spell` rather than dropped - there are 1,401 of them, all Cata and
+  later, and this database cannot say what they target.
+- **`at_teleport`** gates on the pairing delay, not on collapsing each trigger to one
+  destination. The collector allows 30 s for a loading screen, which is long enough to catch the
+  player's next hearthstone; single-destination triggers average 3.9 s of delay and
+  multi-destination ones 16.6 s. After a 3 s gate, 116 of 125 triggers resolve to one
+  destination and **nine keep more than one** - those are real. A trigger can have a conditional
+  destination, so forcing one row per trigger would delete good data to tidy up an artefact.
+
+`creature_spell_cast` is the twelfth table with no published digest, but it already has a
+script - `spell-timers.sql`, step 3b - which had simply never been run against this corpus.
+
+`npc_spellclick` has no rollup, deliberately: the source table is empty and always has been.
+See `TABLES.md`.
 
 ### 2. Mine the routes
 
@@ -169,13 +356,108 @@ including specimens quoted in these docs. Key on coordinates.
 **26.7% of published points now carry `edge_sniffs = 1`.** That is the quarter of the corpus
 this change added, and filtering it back out reproduces the old dataset almost exactly.
 
-**What it does not reach.** A route walked once *per creature* still cannot be confirmed, because
-nothing about it recurs. Deserter Agitator (23602) is the specimen: 6 captures, 55 guids, 260
-points, and its longest traces hold 22 distinct positions in 22 points - one pass each, no lap.
-It recovered from 15 nodes to 36, but 30 of those 36 came from two different Agitators standing
-on the same centimetre rather than from anyone doing a second lap, and 144 of its 180 positions
-were walked exactly once ever. Cross-creature byte-matching is the only evidence such an entry
-can produce, and it is thin by construction.
+#### Phase 4: a proven walk vouches for the rest of itself
+
+The paragraph that used to sit here said a route walked once per creature could not be reached at
+all. That was true per point and it is what phase 4 exists to fix.
+
+A walk is one `(sniff_id, guid)`. Phases 1 and 3 ask of every position and every step, in
+isolation, whether it was seen twice - the right question for a creature picking destinations at
+random and the wrong one for a creature running a script. A scripted walk is one object: if two
+of its steps are byte-identical to another capture, the creature is on an authored path, and the
+part only one person stayed to watch is the rest of that same path.
+
+Malcolm Moore (27891) is the specimen. Seven captures, 40 distinct positions, **33 seen exactly
+once and all 33 exclusive to the single capture that followed him the whole way** - the other six
+turn back between points 2 and 7. He published 5 points of a 39 point walk; he now publishes 40.
+
+Promotion also repairs a defect the per-point rule had on its own. Phase 2 ran its `LEAD` over
+every point and only then joined both ends to `wp_node`, so a point that failed the test did not
+merely vanish, it **severed the step spanning it**. Malcolm again: his `1623.53 -> 1630.20` step
+was confirmed by one capture only, because the other capture that walked it recorded an
+intermediate destination at `1628.01, 806.94` nobody else ever saw, and that traversal became two
+dead steps instead of the second observation. Promotion fixes it the right way round - the
+intermediate point is kept, not jumped over. Bridging the two ends would have invented a leg,
+since phase 0 already reduced every move order to its destination.
+
+**Two admission conditions, and each covers the other's blind spot.** Neither is a safety margin.
+With only the first, this phase turned 607,873 edges into 8,405,393, of which 93% were admitted
+on a walk rather than earned.
+
+1. **The confirmed steps must meet.** `a.to_key = b.from_key` in the same walk is three
+   consecutive positions matching another capture, not two scattered ones. Coincidences are
+   independent events and a long walk collects them; requiring adjacency squares the
+   improbability and is indifferent to how long anyone watched.
+2. **The walk must have gone somewhere** - `radius_robust >= points`, at least a yard of spread
+   per move order issued. Below that the creature is issuing more orders than it has ground to
+   show for them, which is only possible by re-treading.
+
+Spider (14881) is why the second exists: one capture of one spider holds **4,789 move orders over
+2h41m inside a 5.3 yard radius**. Eighteen of its 4,788 steps match another capture, and they are
+not flukes either - 85% of that entry's confirmed edges have two or more independent captures
+behind them - but eighteen coincidences inside a five yard circle say nothing about the other
+4,770 steps.
+
+The first exists because the second only bites on a creature somebody watched for a *long* time:
+`radius_robust` saturates at the wander radius while `points` keeps growing, so a wanderer caught
+in a short window has few orders and a wide radius and sails through. Army of the Dead Ghoul,
+Bloodworm and Sprite Darter Hatchling clear it outright and score **higher on it than Malcolm
+does**, because a pet follows the player and the player covers ground.
+
+| | walks | points | avg orders | avg radius |
+|---|---:|---:|---:|---:|
+| run + went somewhere | 193,360 | 3,033,622 | 16 | 63.8 |
+| run + retreads | 84,898 | 13,060,055 | 154 | 26.9 |
+| scattered + retreads | 5,796 | 1,189,303 | 205 | 17.9 |
+| scattered + went somewhere | 4,676 | 72,963 | 16 | 60.4 |
+
+Promoted steps carry `n_obs = 1`, which the phase 3 rule made impossible, so it is a free
+provenance marker that travels all the way to the published `edge_obs`. `chain-paths.py` already
+sorts on `n_sniffs` then `n_obs`, so it prefers earned steps and only reaches for these when
+nothing better connects.
+
+**A published route must be anchored.** `max_edge_obs = 1` means the chainer assembled a route
+entirely out of promoted steps, none of which was ever confirmed on its own - and the anchor is
+the whole justification for promoting them. That is a consistency requirement, not another
+threshold, and `build-digest.sql` phase 6 enforces it. It is not academic: Wood Frog (7550)
+published a **1,043 point route running 5,295 yards**, every edge at obs 1, because a guid was
+reused across Kalimdor inside one capture and the merged walk inherited a 9,494 yard radius that
+carried it through condition 2.
+
+| | routes | points | longest |
+|---|---:|---:|---:|
+| entirely promoted, no anchor - dropped | 19,834 | 134,788 | 1,043 |
+| anchored, extended by promotion - kept | 26,272 | 256,990 | 488 |
+| every edge earned - kept | 67,478 | 410,143 | 1,780 |
+
+Only 12 entries lose every route they have to the anchor rule.
+
+**Still open: `creature_waypoint` has no summon gate.** `IsTemporarySpawn()` is called by the
+spawn collector and the gameobject collector, and never by `CollectCreatureWaypoints`. Army of
+the Dead Ghoul has 0 rows in `creature_spawn` and 291,967 in `creature_waypoint`; Sprite Darter
+Hatchling 0 and 126,235; Bloodworm 0 and 76,971. The pipeline has a categorical rule for these
+and simply does not apply it here, which is why they had to be refused statistically instead. The
+parser fix is one call and needs a re-ingest.
+
+#### Three points is a route
+
+`build-digest.sql` published from four points up, which deleted 38,844 of 84,226 mined routes -
+46% - across 3,787 entries, **787 of which were left with nothing at all**. The four point floor
+is right where it came from, phase 4c, because there it answers a yes/no question and a three
+point chain is one turn. It does not transfer to the route table, which publishes the route
+beside the evidence for it.
+
+26,467 of the deleted routes had *every* edge confirmed by two or more independent captures, and
+5,197 by three or more, the latter averaging 48.9 yards. Random movement does not produce the
+same ordered pair in three separate captures.
+
+Deserter Agitator (23602) and Locheed (9876) are the specimens, and both were **complete** routes
+rather than truncated ones. Seven captures of one agitator spawn, spanning 2023-06 to 2026-08
+across TBC and WotLK builds, record the same three positions with the same `move_time_ms` - 3082,
+3300, 4400 - and sniff 3005 catches the facing packet 14 seconds after he reaches the last point.
+He arrives, turns, despawns. Locheed is the same shape: `move_time_ms` 4464 on his first leg in
+all twelve captures that saw it. `MIN_POINTS` in `chain-paths.py` was already 3, so the chainer
+was building these and the publish step was throwing every one of them away.
 
 **Chaining alone is 11 seconds.** `wp_node` and `wp_edge` are what cost the 95 minutes, and
 `chain-paths.py` only reads their exports, so a change to how routes are assembled - closure
@@ -237,6 +519,63 @@ file from `DROP TABLE IF EXISTS dg_route_pt;` to the end, drop the `ALTER TABLE 
 COLUMN` line (those columns already exist), keep the session settings from the top, and run
 that: 93 seconds against four hours. Everything before phase 4c depends only on `creature_spawn`,
 `creature_movement` and `creature_waypoint`.
+
+### 3b. Derive the spell timers
+
+```
+mysql -u root -p wpp_ingest < spell-timers.sql
+```
+
+Turns raw `creature_spell_cast` rows into `st_timer`, one min/max pair per creature entry and
+spell. AzerothCore models a spell as a min and a max timer while retail uses a fixed cooldown
+plus a per-update chance, so the pair is an approximation - the script's header says which
+quantiles it picks and why the raw extremes are not the ones to publish.
+
+It also classifies every row as `fixed`, `conditional` or `sparse` from the spread between p10
+and p75. The min/max model only describes a spell whose sole gate is its cooldown; an interrupt,
+a heal or a positional attack fires when its CONDITION occurs, so the observed gap measures the
+fight rather than the spell. Measured over this corpus the separation is stark - average spread
+1.6 for `fixed`, 133.2 for `conditional`. For a conditional spell publish only the lower bound:
+p10 is the floor the cooldown imposes, and the initial timer from `entry-values.sql`, which
+measures aggro to first cast, says more than any repeat interval does.
+
+### 3c. Curate the casts and publish them
+
+```
+mysql -u root -p wpp_ingest < curate-spell-casts.sql
+```
+
+`st_timer` is the working table; this is the one that leaves the database. It strips three things
+the raw casts carry, and the script header argues each of them:
+
+- **Doubled starts.** One cast can emit two `SMSG_SPELL_START` rows, the first with no matching
+  `SPELL_GO`. 10,772 rows, and they are what puts a 247 ms gap where a cooldown should be. Nearly
+  a quarter of all gaps go with them - 3,973,316 down to 3,011,563.
+- **Spells that are not the creature's.** Five, by hand, in `sc_exclude` with a reason on each.
+  48210 Haunt is the big one: 1,285 entries including every raid boss, and 94% of its casts are
+  in sniffs named for a warlock. It is the sniffer.
+- **670 spell ids absent from the 3.3.5a DBC** - modern internal ids the Classic client emits.
+
+There is no automatic player-spell test and the script does not pretend otherwise. Entry breadth
+does not work (Enrage is on 163 entries and is real), `SpellFamilyName` is 0 for Haunt as well as
+for creature spells, `sniff.sniffer` is empty for every row, and wotlkmangos has no
+`skill_line_ability`. `entries_sharing` is published as a column so a reviewer can see a suspect
+instead of the script having silently dropped it.
+
+Two objects come out:
+
+- **`acore_world.sniff_creature_spell`** - one row per entry and spell, initial timers beside
+  repeat timers, `accuracy` on the usual 2/1/0, and `shape`. Read the shape split before trusting
+  a timer: at accuracy 2 there are 2,515 `conditional` rows against 1,545 `fixed`. Most
+  well-sampled spells do not fit a min/max pair at all.
+- **`acore_world.sniff_creature_smartai`** - a view. `WHERE entry = 30989` gives that creature's
+  proposal with a paste-ready `smart_scripts` tuple and `ac_has_it` saying whether AzerothCore
+  already scripts that spell there. It offers accuracy >= 1 only.
+
+**Avenger's Shield on 30986 is the regression check.** AC scripts it as `SMART_EVENT_AGGRO` and
+the sniff agrees independently - 41 pulls, median 0 ms. If the rebuilt table does not call it
+`opener`, the median or the classifier has drifted. It caught exactly that once already: a
+`PERCENT_RANK BETWEEN .4 AND .6` median put it at 524 ms and suppressed 636 openers corpus-wide.
 
 ### 4. Publish the loot and gameobjects
 

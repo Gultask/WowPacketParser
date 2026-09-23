@@ -125,6 +125,15 @@ namespace WowPacketParser.SQL.Builders
             return default;
         }
 
+        protected override VoidType Process(PacketBase basePacket, PacketUpdateObject packet)
+        {
+            foreach (var created in packet.Created)
+                if (created.Spline != null)
+                    Process(basePacket, created.Spline);
+
+            return default;
+        }
+
         protected override string GenerateQuery()
         {
             StringBuilder output = new();

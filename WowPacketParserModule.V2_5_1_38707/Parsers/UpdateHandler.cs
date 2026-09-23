@@ -174,7 +174,7 @@ namespace WowPacketParserModule.V2_5_1_38707.Parsers
             WoWObject obj = CoreParsers.UpdateHandler.CreateObject(objType, guid, map, packet);
 
             obj.CreateType = createType;
-            obj.Movement = ReadMovementUpdateBlock(packet, guid, obj, index);
+            obj.Movement = ReadMovementUpdateBlock(packet, createObject, guid, obj, index);
 
             if (ClientVersion.AddedInVersion(ClientVersionBuild.V2_5_4_42695))
             {
@@ -210,11 +210,11 @@ namespace WowPacketParserModule.V2_5_1_38707.Parsers
                             break;
                         }
                         case ObjectType.Player:
-                            handler.ReadCreateUnitData(fieldsData, flags, index);
+                            createObject.Values.Fields.UpdateData(handler.ReadCreateUnitData(fieldsData, flags, index));
                             handler.ReadCreatePlayerData(fieldsData, flags, index);
                             break;
                         case ObjectType.ActivePlayer:
-                            handler.ReadCreateUnitData(fieldsData, flags, index);
+                            createObject.Values.Fields.UpdateData(handler.ReadCreateUnitData(fieldsData, flags, index));
                             handler.ReadCreatePlayerData(fieldsData, flags, index);
                             handler.ReadCreateActivePlayerData(fieldsData, flags, index);
                             break;
@@ -273,7 +273,7 @@ namespace WowPacketParserModule.V2_5_1_38707.Parsers
             return (float)ang;
         }
 
-        private static MovementInfo ReadMovementUpdateBlock(Packet packet, WowGuid guid, WoWObject obj, object index)
+        private static MovementInfo ReadMovementUpdateBlock(Packet packet, CreateObject createObject, WowGuid guid, WoWObject obj, object index)
         {
             var moveInfo = new MovementInfo();
 
@@ -444,7 +444,7 @@ namespace WowPacketParserModule.V2_5_1_38707.Parsers
                     packet.ResetBitReader();
                     packet.ReadInt32("ID", index);
 
-                    PacketMonsterMove monsterMove = packet.Holder.MonsterMove = new();
+                    PacketMonsterMove monsterMove = createObject.Spline = new() { CreationSpline = true };
                     monsterMove.Mover = moverGuid;
 
                     var destination = packet.ReadVector3("Destination", index);

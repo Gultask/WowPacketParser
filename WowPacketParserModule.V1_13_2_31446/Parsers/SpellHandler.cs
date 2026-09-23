@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using WowPacketParser.DBC;
 using WowPacketParser.Enums;
@@ -55,7 +55,11 @@ namespace WowPacketParserModule.V1_13_2_31446.Parsers
 
             int mapID = -1;
             if (hasMapID)
+            {
                 mapID = (ushort)packet.ReadInt32("MapID", idx);
+                if (packetSpellData != null)
+                    packetSpellData.DstMapId = (uint)mapID;
+            }
 
             if (Settings.UseDBC && dstLocation != null && mapID != -1)
             {
@@ -182,7 +186,7 @@ namespace WowPacketParserModule.V1_13_2_31446.Parsers
         public static void HandleAuraUpdate(Packet packet)
         {
             PacketAuraUpdate packetAuraUpdate = packet.Holder.AuraUpdate = new();
-            packet.ReadBit("UpdateAll");
+            packetAuraUpdate.UpdateAll = packet.ReadBit("UpdateAll");
             int countBits = ClientVersion.AddedInVersion(ClientVersionBuild.V1_13_3_32790) ? 8 : 7;
             var count = packet.ReadBits("AurasCount", countBits);
 
@@ -228,7 +232,7 @@ namespace WowPacketParserModule.V1_13_2_31446.Parsers
                         V8_0_1_27101.Parsers.SpellHandler.ReadContentTuningParams(packet, i, "ContentTuning");
 
                     if (hasCastUnit)
-                        auraEntry.CasterUnit = packet.ReadPackedGuid128("CastUnit", i);
+                        auraEntry.CasterUnit = aura.CasterGuid = packet.ReadPackedGuid128("CastUnit", i);
 
                     aura.Duration = hasDuration ? packet.ReadInt32("Duration", i) : 0;
                     aura.MaxDuration = hasRemaining ? packet.ReadInt32("Remaining", i) : 0;

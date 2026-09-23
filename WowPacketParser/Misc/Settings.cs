@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using WowPacketParser.Enums;
 
 namespace WowPacketParser.Misc
@@ -61,6 +62,8 @@ namespace WowPacketParser.Misc
         public static readonly string WPPDatabase = Conf.GetString("WPPDatabase", "WPP");
         public static readonly string IngestDatabase = Conf.GetString("IngestDatabase", "wpp_ingest");
         public static readonly ClientType IngestMaxContentExpansion = GetIngestMaxContentExpansion();
+        public static readonly string IngestMapPolicy = Conf.GetString("IngestMapPolicy", string.Empty);
+        public static readonly uint[] IngestMapDeny = GetIngestMapDeny();
         public static readonly string TDBDatabase = Conf.GetString("TDBDatabase", "world");
         public static readonly string HotfixesDatabase = Conf.GetString("HotfixesDatabase", "hotfixes");
         public static readonly string CharacterSet = Conf.GetString("CharacterSet", "utf8");
@@ -89,6 +92,32 @@ namespace WowPacketParser.Misc
             throw new ArgumentException(
                 $"IngestMaxContentExpansion '{value}' is not a ClientType. Use a name such as " +
                 "WrathOfTheLichKing, Cataclysm or MistsOfPandaria, or leave it empty for no limit.");
+        }
+
+        /// <summary>
+        /// Extra maps to drop on top of whatever IngestMapPolicy allows. Same reasoning as
+        /// above: a map id that silently fails to parse would widen the gate rather than narrow
+        /// it, and the run would look like a success.
+        /// </summary>
+        private static uint[] GetIngestMapDeny()
+        {
+            var values = Conf.GetStringList("IngestMapDeny", new string[0]);
+            var maps = new List<uint>(values.Length);
+
+            foreach (var value in values)
+            {
+                var trimmed = value.Trim();
+                if (trimmed.Length == 0)
+                    continue;
+
+                if (!uint.TryParse(trimmed, out var map))
+                    throw new ArgumentException(
+                        $"IngestMapDeny '{trimmed}' is not a map id. Give a comma separated list of numbers.");
+
+                maps.Add(map);
+            }
+
+            return maps.ToArray();
         }
 
         private static UInt128 GetSQLOutputFlag()

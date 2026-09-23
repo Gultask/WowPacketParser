@@ -6,16 +6,35 @@
 # path_point every time. Budget an hour - phase 1 and phase 2 each scan creature_waypoint.
 #
 #   ./mine-paths.sh [workdir]
+#   DB=other-database ./mine-paths.sh
 set -euo pipefail
 
-DB=wpp_ingest
+DB=${DB:-wpp_ingest}
 MYSQL="mysql -u root -proot --local-infile=1"
 WORK="${1:-/c/WowPacketParser/scripts/.paths}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$WORK"
 
-echo "== mining nodes and edges =="
-$MYSQL --table "$DB" < "$HERE/mine-paths.sql"
+# The buffer pool goes back to its 128 MB default whenever the MySQL service restarts, and a
+# mine at that size is not slow, it is a different job - phase 0 alone took 57 minutes on
+# 2026-09-09 before anyone noticed. Warn rather than change it: an online resize is the
+# operator's call and this script does not own the server.
+POOL=$($MYSQL -N -e "SELECT @@innodb_buffer_pool_size" 2>/dev/null | tr -dc 0-9)
+if [ -n "${POOL:-}" ] && [ "$POOL" -lt 1073741824 ]; then
+  echo "WARNING: innodb_buffer_pool_size is $((POOL/1024/1024)) MB. Everything below will crawl."
+  echo "         SET GLOBAL innodb_buffer_pool_size = 4294967296;   -- online, reverts on restart"
+fi
+
+# SKIP_MINE=1 picks the run up at the export, for when mine-paths.sql already ran - including
+# when it was resumed by hand from a middle phase after a failure. The mine is two hours and
+# phases 0 and 1 are deterministic, so re-deriving wp_point to redo a five minute export is
+# not a price worth paying twice.
+if [[ "${SKIP_MINE:-0}" == "1" ]]; then
+  echo "== skipping the mine; wp_node and wp_edge are taken as they stand =="
+else
+  echo "== mining nodes and edges =="
+  $MYSQL --table "$DB" < "$HERE/mine-paths.sql"
+fi
 
 echo "== exporting =="
 # --batch gives a tab separated dump with a header row, which is what chain-paths.py reads.

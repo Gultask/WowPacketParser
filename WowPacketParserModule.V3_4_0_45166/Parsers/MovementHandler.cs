@@ -399,7 +399,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
         public static void HandleNewWorld(Packet packet)
         {
             WowPacketParser.Parsing.Parsers.MovementHandler.CurrentMapId = (uint)packet.ReadInt32<MapId>("Map");
-            packet.ReadVector4("Position");
+            WowPacketParser.Parsing.Parsers.MovementHandler.RecordWorldPort(packet, packet.ReadVector4("Position"));
             packet.ReadUInt32("Reason");
             packet.ReadVector3("MovementOffset");
             if (ClientVersion.AddedInVersion(ClientVersionBuild.V3_4_4_59817))

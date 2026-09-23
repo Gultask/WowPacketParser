@@ -127,23 +127,26 @@ LIMIT 50;
 -- 6. Gameobject spawns AzerothCore has no row for, WotLK evidence only.
 --
 -- `sniff_gameobject_spawn` is the import-shaped table: one row per entry and position, with the rotation
--- quaternion AzerothCore's `gameobject` table wants. `wotlk_sniffs` is the number of independent
--- WotLK captures that saw it - one is one person standing somewhere, five is a spawn.
+-- quaternion AzerothCore's `gameobject` table wants, under AzerothCore's own column names.
+-- `wotlk_sniffs` is the number of independent WotLK captures that saw it - one is one person
+-- standing somewhere, five is a spawn.
 -- -------------------------------------------------------------------------------------------
-SELECT g.entry, COALESCE(n.name, CONCAT('#', g.entry)) AS name,
-       g.map, ROUND(g.x, 2) AS x, ROUND(g.y, 2) AS y, ROUND(g.z, 2) AS z,
-       ROUND(g.o, 4) AS o, g.rot0, g.rot1, g.rot2, g.rot3,
-       g.obs, g.wotlk_sniffs, g.first_build
+SELECT g.id, COALESCE(n.name, CONCAT('#', g.id)) AS name,
+       g.map, ROUND(g.position_x, 2) AS position_x, ROUND(g.position_y, 2) AS position_y,
+       ROUND(g.position_z, 2) AS position_z,
+       ROUND(g.orientation, 4) AS orientation,
+       g.rotation0, g.rotation1, g.rotation2, g.rotation3,
+       g.obs, g.wotlk_sniffs, g.VerifiedBuild
 FROM sniff_gameobject_spawn g
-LEFT JOIN sniff_names n ON n.object_type = 'GameObject' AND n.id = g.entry
+LEFT JOIN sniff_names n ON n.object_type = 'GameObject' AND n.id = g.id
 WHERE g.wotlk_sniffs >= 2
   AND g.rot_variants = 1
   AND NOT EXISTS (
       SELECT 1 FROM acore_world.gameobject ac
-      WHERE ac.id = g.entry AND ac.map = g.map
-        AND POW(ac.position_x - g.x, 2) + POW(ac.position_y - g.y, 2)
-          + POW(ac.position_z - g.z, 2) < 25)
-ORDER BY g.wotlk_sniffs DESC, g.entry
+      WHERE ac.id = g.id AND ac.map = g.map
+        AND POW(ac.position_x - g.position_x, 2) + POW(ac.position_y - g.position_y, 2)
+          + POW(ac.position_z - g.position_z, 2) < 25)
+ORDER BY g.wotlk_sniffs DESC, g.id
 LIMIT 100;
 
 -- -------------------------------------------------------------------------------------------
@@ -183,19 +186,20 @@ LIMIT 100;
 -- -------------------------------------------------------------------------------------------
 -- 8. Every entry that ever shared a point with a given one - the pool's full membership.
 --
--- e1..e8 truncate at eight, which only 16 positions in the whole corpus exceed - all of them
--- firework launch points rather than pools. This reaches past the columns anyway by going back
--- to sniff_gameobject_spawn, which keeps every entry.
+-- e1..e8 truncate at eight, which only 28 positions in the whole corpus exceed - firework
+-- launch points, Stratholme supply crates and one banner aura, none of them pools. This reaches
+-- past the columns anyway by going back to sniff_gameobject_spawn, which keeps every entry.
 -- -------------------------------------------------------------------------------------------
 SET @go := 189978;   -- Cobalt Deposit
 
-SELECT COALESCE(n.name, CONCAT('#', b.entry)) AS shares_with, b.entry,
+SELECT COALESCE(n.name, CONCAT('#', b.id)) AS shares_with, b.id,
        COUNT(*) AS shared_points, SUM(b.obs) AS obs
 FROM sniff_gameobject_spawn a
-JOIN sniff_gameobject_spawn b ON b.map = a.map AND b.x = a.x AND b.y = a.y AND b.z = a.z
-                   AND b.entry <> a.entry
-LEFT JOIN sniff_names n ON n.object_type = 'GameObject' AND n.id = b.entry
-WHERE a.entry = @go AND a.wotlk_sniffs >= 1
-GROUP BY b.entry, shares_with
+JOIN sniff_gameobject_spawn b ON b.map = a.map AND b.position_x = a.position_x
+                             AND b.position_y = a.position_y AND b.position_z = a.position_z
+                             AND b.id <> a.id
+LEFT JOIN sniff_names n ON n.object_type = 'GameObject' AND n.id = b.id
+WHERE a.id = @go AND a.wotlk_sniffs >= 1
+GROUP BY b.id, shares_with
 ORDER BY shared_points DESC
 LIMIT 30;

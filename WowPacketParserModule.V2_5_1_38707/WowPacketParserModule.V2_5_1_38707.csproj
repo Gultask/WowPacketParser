@@ -6,6 +6,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\WowPacketParserModule.V1_13_2_31446\WowPacketParserModule.V1_13_2_31446.csproj" />
         <ProjectReference Include="..\WowPacketParserModule.V9_0_1_36216\WowPacketParserModule.V9_0_1_36216.csproj" />
     </ItemGroup>
 </Project>

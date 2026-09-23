@@ -220,17 +220,25 @@ namespace WowPacketParserModule.V5_5_0_61735.Parsers
             Vector3? dstLocation = null;
             if (hasDstLoc)
             {
-                ReadLocation(packet, idx, "DstLocation");
+                dstLocation = ReadLocation(packet, idx, "DstLocation");
                 if (packetSpellData != null)
                     packetSpellData.DstLocation = dstLocation;
             }
 
             if (hasOrient)
-                packet.ReadSingle("Orientation", idx);
+            {
+                var orientation = packet.ReadSingle("Orientation", idx);
+                if (packetSpellData != null)
+                    packetSpellData.DstOrientation = orientation;
+            }
 
             int mapID = -1;
             if (hasMapID)
+            {
                 mapID = (ushort)packet.ReadInt32("MapID", idx);
+                if (packetSpellData != null)
+                    packetSpellData.DstMapId = (uint)mapID;
+            }
 
             if (Settings.UseDBC && dstLocation != null && mapID != -1)
             {
@@ -287,17 +295,25 @@ namespace WowPacketParserModule.V5_5_0_61735.Parsers
             Vector3? dstLocation = null;
             if (hasDstLoc)
             {
-                ReadLocation(packet, idx, "DstLocation");
+                dstLocation = ReadLocation(packet, idx, "DstLocation");
                 if (packetSpellData != null)
                     packetSpellData.DstLocation = dstLocation;
             }
 
             if (hasOrient)
-                packet.ReadSingle("Orientation", idx);
+            {
+                var orientation = packet.ReadSingle("Orientation", idx);
+                if (packetSpellData != null)
+                    packetSpellData.DstOrientation = orientation;
+            }
 
             int mapID = -1;
             if (hasMapID)
+            {
                 mapID = (ushort)packet.ReadInt32("MapID", idx);
+                if (packetSpellData != null)
+                    packetSpellData.DstMapId = (uint)mapID;
+            }
 
             if (Settings.UseDBC && dstLocation != null && mapID != -1)
             {
@@ -856,7 +872,7 @@ namespace WowPacketParserModule.V5_5_0_61735.Parsers
         {
             PacketAuraUpdate packetAuraUpdate = packet.Holder.AuraUpdate = new();
 
-            packet.ReadBit("UpdateAll");
+            packetAuraUpdate.UpdateAll = packet.ReadBit("UpdateAll");
             var count = packet.ReadBits("AurasCount", 9);
 
             var auras = new List<Aura>();
@@ -913,7 +929,7 @@ namespace WowPacketParserModule.V5_5_0_61735.Parsers
                             CombatLogHandler.ReadContentTuningParams(packet, i, "ContentTuning");
 
                         if (hasCastUnit)
-                            auraEntry.CasterUnit = packet.ReadPackedGuid128("CastUnit", i);
+                            auraEntry.CasterUnit = aura.CasterGuid = packet.ReadPackedGuid128("CastUnit", i);
 
                         if (hasCastUnit2)
                             packet.ReadPackedGuid128("CastUnit2", i);
@@ -961,7 +977,7 @@ namespace WowPacketParserModule.V5_5_0_61735.Parsers
                                 CombatLogHandler.ReadContentTuningParams(packet, i, "ContentTuning");
 
                             if (hasCastUnit)
-                                auraEntry.CasterUnit = packet.ReadPackedGuid128("CastUnit", i);
+                                auraEntry.CasterUnit = aura.CasterGuid = packet.ReadPackedGuid128("CastUnit", i);
 
                             aura.Duration = hasDuration ? packet.ReadInt32("Duration", i) : 0;
                             aura.MaxDuration = hasRemaining ? packet.ReadInt32("Remaining", i) : 0;
@@ -1211,7 +1227,9 @@ namespace WowPacketParserModule.V5_5_0_61735.Parsers
         [Parser(Opcode.SMSG_SPELL_START, ClientBranch.MoP)]
         public static void HandleSpellStart(Packet packet)
         {
-            ReadSpellCastData(packet, "Cast");
+            PacketSpellStart packetSpellStart = new();
+            packetSpellStart.Data = ReadSpellCastData(packet, "Cast");
+            packet.Holder.SpellStart = packetSpellStart;
         }
 
         [Parser(Opcode.SMSG_RESUME_CAST)]
