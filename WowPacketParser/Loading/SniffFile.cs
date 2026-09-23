@@ -349,6 +349,8 @@ namespace WowPacketParser.Loading
                                     packets.Packets_.Add(packet.Holder);
                                 else if (movementEnabled && WantedByIngest(packet.Holder))
                                     packets.Packets_.Add(packet.Holder);
+                                else if (movementEnabled && CreationSplines(packet.Holder) is { } splines)
+                                    packets.Packets_.Add(splines);
                             }
                         }, threadCount);
 
@@ -1356,6 +1358,28 @@ namespace WowPacketParser.Loading
                    holder.NpcText != null ||
                    holder.NpcTextOld != null ||
                    holder.ClientAreaTrigger != null;
+        }
+
+        /// <summary>
+        /// The creatures an update packet created mid-spline, kept without their values.
+        ///
+        /// The packet itself is not worth holding on to - its values are folded as it is read -
+        /// but the splines are waypoints, and the collector needs them in packet order among the
+        /// SMSG_ON_MONSTER_MOVEs.
+        /// </summary>
+        private static PacketHolder CreationSplines(PacketHolder holder)
+        {
+            PacketUpdateObject kept = null;
+            foreach (var created in holder.UpdateObject?.Created ?? Enumerable.Empty<CreateObject>())
+            {
+                if (created.Spline == null)
+                    continue;
+
+                kept ??= new PacketUpdateObject { MapId = holder.UpdateObject.MapId };
+                kept.Created.Add(new CreateObject { Guid = created.Guid, CreateType = created.CreateType, Spline = created.Spline });
+            }
+
+            return kept == null ? null : new PacketHolder { BaseData = holder.BaseData, UpdateObject = kept };
         }
 
         /// <summary>What each creature was drawn holding.</summary>
@@ -2508,23 +2532,32 @@ namespace WowPacketParser.Loading
             // that arrives on its own afterwards can be attached to it.
             var lastPointIndex = new Dictionary<string, int>();
 
-            foreach (var holder in packets.Packets_)
+            // A creature created mid-spline has its spline on the CreateObject entry; everything
+            // else comes from SMSG_ON_MONSTER_MOVE. Nothing in the parser sets creationSpline on a
+            // move packet, so the flag is what tells the two apart. The distinction matters: a
+            // create block states its Destination outright, while SMSG_ON_MONSTER_MOVE leaves that
+            // field unset in these builds and its real destination is simply the last point.
+            IEnumerable<(PacketHolder Holder, PacketMonsterMove Move)> Moves()
             {
-                var move = holder.MonsterMove;
+                foreach (var holder in packets.Packets_)
+                {
+                    if (holder.MonsterMove != null)
+                        yield return (holder, holder.MonsterMove);
+                    else if (holder.UpdateObject != null)
+                        foreach (var created in holder.UpdateObject.Created)
+                            if (created.Spline != null)
+                                yield return (holder, created.Spline);
+                }
+            }
+
+            foreach (var (holder, move) in Moves())
+            {
                 if (move?.Mover == null || move.Mover.Type != UniversalHighGuid.Creature)
                     continue;
 
                 var key = GuidKey(move.Mover);
                 if (key == null || aggroed.Contains(key) || !maps.TryGetValue(key, out var map))
                     continue;
-
-                // A spline read out of a CreateObject block sets Holder.MonsterMove too, so the
-                // opcode is what tells the two apart. Nothing in the parser ever sets the proto's
-                // creationSpline flag, and the distinction matters: a create block states its
-                // Destination outright, while SMSG_ON_MONSTER_MOVE leaves that field unset in
-                // these builds and its real destination is simply the last point.
-                var fromCreateObject = holder.BaseData?.Opcode != null &&
-                                       holder.BaseData.Opcode.Contains("UPDATE_OBJECT");
 
                 var points = new List<Vec3>(move.Points);
 
@@ -2571,7 +2604,7 @@ namespace WowPacketParser.Loading
                         PositionZ = points[i].Z,
                         Orientation = i == points.Count - 1 ? finalOrientation : null,
                         SplineFlags = (uint)move.Flags,
-                        CreationSpline = fromCreateObject,
+                        CreationSpline = move.CreationSpline,
                         MoveTimeMs = move.MoveTime != 0 ? move.MoveTime : null,
                         SeenUtc = seen
                     });

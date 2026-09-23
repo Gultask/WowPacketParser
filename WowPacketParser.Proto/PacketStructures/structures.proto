@@ -739,6 +739,10 @@ message CreateObject {
   google.protobuf.Int32Value textStartOffset = 9;
   google.protobuf.Int32Value textLength = 10;
   optional string text = 11;
+  // A creature created mid-spline, in the shape SMSG_ON_MONSTER_MOVE uses. It used to be put in
+  // the holder's own monsterMove, which shares the kind oneof with updateObject and so threw the
+  // whole packet's creates and updates away.
+  optional PacketMonsterMove spline = 12;
 }
 
 message UpdateObject {

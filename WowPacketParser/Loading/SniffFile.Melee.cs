@@ -133,12 +133,10 @@ namespace WowPacketParser.Loading
         /// <summary>
         /// The tracked state, topped up from Storage where the update stream never said.
         ///
-        /// Two gaps make that necessary. A create block carrying a spline has its holder's oneof
-        /// switched to MonsterMove on the builds that read creates through V2_5_1 or
-        /// UpdateHandler11x, which loses the UpdateObject - 17% of a WotLK Classic capture's
-        /// update packets. And a unit whose create came before the capture started never had one.
-        /// Storage is read ahead of the write stage by the parse threads, which is harmless for
-        /// level and attack time; armor is left unknown instead, since Storage cannot tell a
+        /// A unit whose create came before the capture started never had its values sent whole.
+        /// (Until protobuf structure 27 a create block carrying a spline also lost its packet's
+        /// UpdateObject - 17% of a WotLK Classic capture's update packets.) Storage is read ahead
+        /// of the write stage by the parse threads, which is harmless for level and attack time; armor is left unknown instead, since Storage cannot tell a
         /// creature's unsent armor from a real zero.
         /// </summary>
         private UnitState StateOf(string key, UniversalGuid guid)
