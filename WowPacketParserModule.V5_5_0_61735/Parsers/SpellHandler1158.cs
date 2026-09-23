@@ -427,7 +427,9 @@ namespace WowPacketParserModule.V5_5_0_61735.Parsers
         [Parser(Opcode.SMSG_SPELL_START, ClientBranch.TBC)]
         public static void HandleSpellStart(Packet packet)
         {
-            ReadSpellCastData(packet, "Cast");
+            PacketSpellStart packetSpellStart = new();
+            packetSpellStart.Data = ReadSpellCastData(packet, "Cast");
+            packet.Holder.SpellStart = packetSpellStart;
         }
 
         [Parser(Opcode.CMSG_CAST_SPELL, ClientBranch.TBC)]

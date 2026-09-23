@@ -80,7 +80,7 @@
         public const int CreatureWaypointVersion = 3;   // 2 added segment point counts, 3 gates owned creatures
         public const int LootVersion = 1;
         public const int CreatureMovementVersion = 1;
-        public const int CreatureSpellVersion = 1;
+        public const int CreatureSpellVersion = 2;   // 2 reads SMSG_SPELL_START on TBC Anniversary
         public const int SpellTargetVersion = 2;   // 2 added player hits and self_hits
         public const int SpellDestinationVersion = 1;
         public const int CreatureEquipVersion = 1;
