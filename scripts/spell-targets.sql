@@ -17,7 +17,7 @@
 -- AzerothCore's conditions row for spell 3730 points at creature 15263. Query 0 re-runs that
 -- check, and should be read before trusting anything below it.
 --
--- Reads wpp_ingest2 (spell_target, spell_destination) against wotlkmangos (Spell.dbc as a
+-- Reads wpp_ingest (spell_target, spell_destination) against wotlkmangos (Spell.dbc as a
 -- table) and acore_world (what the core already has).
 --
 -- BRANCH. Cataclysm and later rewrote spells as freely as they rewrote terrain, so a modern
@@ -25,7 +25,7 @@
 -- filters to WotLK and below. Widening that is a decision, not a default.
 
 -- Temporary tables need a default schema; every other reference is qualified.
-USE wpp_ingest2;
+USE wpp_ingest;
 
 -- ---------------------------------------------------------------------------
 -- 0. Sanity: does target type 38 really mean "entry from the server's table"?
@@ -74,8 +74,8 @@ SELECT st.spell_id,
             WHEN FIND_IN_SET(st.target_entry, ac.entries) > 0    THEN 'agrees'
             ELSE CONCAT('core says ', ac.entries)
        END                               AS agreement
-FROM wpp_ingest2.spell_target st
-JOIN wpp_ingest2.sniff s          ON s.id = st.sniff_id
+FROM wpp_ingest.spell_target st
+JOIN wpp_ingest.sniff s          ON s.id = st.sniff_id
 JOIN t38                          ON t38.spell_id = st.spell_id
 LEFT JOIN wotlkmangos.spell_template sp ON sp.id = st.spell_id
 LEFT JOIN wpp.object_names n      ON n.objecttype = 'Unit' AND n.id = st.target_entry
@@ -119,8 +119,8 @@ SELECT sd.spell_id,
        ROUND(GREATEST(MAX(sd.position_x) - MIN(sd.position_x),
                       MAX(sd.position_y) - MIN(sd.position_y)), 1) AS spread_yd,
        CASE WHEN p.id IS NULL THEN 'core has no row' ELSE 'core has one' END AS agreement
-FROM wpp_ingest2.spell_destination sd
-JOIN wpp_ingest2.sniff s ON s.id = sd.sniff_id
+FROM wpp_ingest.spell_destination sd
+JOIN wpp_ingest.sniff s ON s.id = sd.sniff_id
 JOIN t17                 ON t17.spell_id = sd.spell_id
 LEFT JOIN wotlkmangos.spell_template sp ON sp.id = sd.spell_id
 LEFT JOIN (SELECT DISTINCT ID AS id FROM acore_world.spell_target_position) p ON p.id = sd.spell_id
@@ -135,23 +135,23 @@ LIMIT 200;
 
 SELECT 'target 38 spells observed hitting something' AS metric,
        COUNT(DISTINCT st.spell_id) AS n
-FROM wpp_ingest2.spell_target st JOIN t38 ON t38.spell_id = st.spell_id
-JOIN wpp_ingest2.sniff s ON s.id = st.sniff_id AND s.branch IN ('Classic','TBC','WotLK')
+FROM wpp_ingest.spell_target st JOIN t38 ON t38.spell_id = st.spell_id
+JOIN wpp_ingest.sniff s ON s.id = st.sniff_id AND s.branch IN ('Classic','TBC','WotLK')
 UNION ALL
 SELECT 'of those, no conditions row in AzerothCore',
        COUNT(DISTINCT st.spell_id)
-FROM wpp_ingest2.spell_target st JOIN t38 ON t38.spell_id = st.spell_id
-JOIN wpp_ingest2.sniff s ON s.id = st.sniff_id AND s.branch IN ('Classic','TBC','WotLK')
+FROM wpp_ingest.spell_target st JOIN t38 ON t38.spell_id = st.spell_id
+JOIN wpp_ingest.sniff s ON s.id = st.sniff_id AND s.branch IN ('Classic','TBC','WotLK')
 WHERE NOT EXISTS (SELECT 1 FROM acore_world.conditions c
                   WHERE c.SourceTypeOrReferenceId = 13 AND c.SourceEntry = st.spell_id)
 UNION ALL
 SELECT 'target 17 spells observed with a destination',
        COUNT(DISTINCT sd.spell_id)
-FROM wpp_ingest2.spell_destination sd JOIN t17 ON t17.spell_id = sd.spell_id
-JOIN wpp_ingest2.sniff s ON s.id = sd.sniff_id AND s.branch IN ('Classic','TBC','WotLK')
+FROM wpp_ingest.spell_destination sd JOIN t17 ON t17.spell_id = sd.spell_id
+JOIN wpp_ingest.sniff s ON s.id = sd.sniff_id AND s.branch IN ('Classic','TBC','WotLK')
 UNION ALL
 SELECT 'of those, no spell_target_position row',
        COUNT(DISTINCT sd.spell_id)
-FROM wpp_ingest2.spell_destination sd JOIN t17 ON t17.spell_id = sd.spell_id
-JOIN wpp_ingest2.sniff s ON s.id = sd.sniff_id AND s.branch IN ('Classic','TBC','WotLK')
+FROM wpp_ingest.spell_destination sd JOIN t17 ON t17.spell_id = sd.spell_id
+JOIN wpp_ingest.sniff s ON s.id = sd.sniff_id AND s.branch IN ('Classic','TBC','WotLK')
 WHERE NOT EXISTS (SELECT 1 FROM acore_world.spell_target_position p WHERE p.ID = sd.spell_id);

@@ -25,7 +25,7 @@ Pets are left out: their sheet is pet_levelstats plus the owner's share, not a t
 import sys, subprocess
 from collections import defaultdict
 
-DB = sys.argv[1] if len(sys.argv) > 1 else 'wpp_ingest2'
+DB = sys.argv[1] if len(sys.argv) > 1 else 'wpp_ingest'
 TOLERANCE = 0.005          # relative miss on min allowed; the sheet is a float, so the fit is exact
 
 

@@ -32,7 +32,7 @@ what they do.
 import sys, json, subprocess
 from collections import defaultdict
 
-DB = sys.argv[1] if len(sys.argv) > 1 else 'wpp_ingest2'
+DB = sys.argv[1] if len(sys.argv) > 1 else 'wpp_ingest'
 MIN_HITS = int(sys.argv[2]) if len(sys.argv) > 2 else 10
 
 # 3.3.5 AuraType values that change a melee swing's damage or its timing.

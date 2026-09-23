@@ -51,7 +51,7 @@ The three arrows that matter:
 ### 1. Ingest
 
 ```
-.\ingest-sniffs.ps1 -Path 'G:\sniff-storage' -Database wpp_ingest2 -MapPolicy wotlk -Threads 4 -LogFile 'G:\ingest.log'
+.\ingest-sniffs.ps1 -Path 'G:\sniff-storage' -Database wpp_ingest -MapPolicy wotlk -LogFile 'G:\ingest.log'
 ```
 
 Walks folders for `.pkt` and archives, runs WowPacketParser with DumpFormat 17 (straight to
@@ -139,30 +139,26 @@ that evidence comes from.
 #### What one sniff now yields
 
 Beyond spawns, waypoints and loot: `creature_spell_cast` (every SMSG_SPELL_START by a creature,
-raw), `spell_target`, `spell_destination`, `creature_equip`, `creature_aura`, `gossip_menu`,
+raw), `spell_target`, `spell_destination`, `creature_equip`, `gossip_menu`,
 `gossip_menu_option`, `npc_text`, `areatrigger_teleport`, `npc_vendor`, `npc_spellclick`,
-`creature_template_spell`, `creature_quest_item`, `creature_gossip`, `creature_value` and
-`creature_aggro`.
+`creature_template_spell`, `creature_quest_item`, `creature_gossip`, `creature_value`,
+`creature_aggro`, `gameobject_template`, `gameobject_quest_item`, `trainer`, `npc_trainer`,
+`gossip_poi`, `quest_poi` and `quest_poi_point`. Creature auras are no longer collected.
 
 Run `entry-values.sql` afterwards to roll the per-guid values up to the entry - `entry_value`,
 `entry_value_best` - and to derive initial cast timers from the pulls. It also strips the runtime
 bits out of `unit_flags` on the way through; see `TABLES.md`.
 
-Then `entry-auras.sql`, which is what makes `creature_aura` usable. Read raw the table is a
-combat log: only 7.4% of its entry-and-spell pairs are the creature's own aura, and the
-widest-spread of them are one warlock's DoTs following them across 1,989 entries. The script
-sorts them and only the `addon` verdict is publishable.
-
 ```
-mysql -u root -p wpp_ingest2 < entry-values.sql
-mysql -u root -p wpp_ingest2 < entry-auras.sql
+mysql -u root -p wpp_ingest < entry-values.sql
 ```
 
 **A trap worth knowing about.** Most of those last six read from `Storage` bags that the parser
 switches off unless their `SQLOutput` flag is set - `StoreBag.Add` is a no-op when disabled - and
 the ingest sets none of them, so the bags were silently empty. Database mode now turns on exactly
-the five outputs its collectors read (`creature_template`, `creature_template_gossip`,
-`creature_spell_list`, `npc_vendor`, `npc_spellclick_spells`) and no more, because enabling the
+the outputs its collectors read (`creature_template`, `creature_template_gossip`,
+`creature_spell_list`, `npc_vendor`, `npc_spellclick_spells`, `gameobject_template`,
+`npc_trainer`, `trainer`, `points_of_interest`, `quest_poi`, `quest_poi_points`) and no more, because enabling the
 lot would collect quest, item and hotfix data nothing here reads.
 
 **And a second one.** `creature_template_spell` is the action bar the server sends for a
@@ -182,7 +178,7 @@ verified on 4.4.1, which reports `empty` rather than `unsupported`.
 ### 1b. Recover the CreateObject2 flag
 
 ```
-mysql -u root -p wpp_ingest2 < recover-co2.sql
+mysql -u root -p wpp_ingest < recover-co2.sql
 ```
 
 Run this after every ingest, before anything reads `creature_spawn`. It is fast and it is a
@@ -214,7 +210,7 @@ carries the validation and the tolerance table.
 ### 1c. Roll up the tables that had no digest
 
 ```
-mysql -u root -p wpp_ingest2 < roll-up-tables.sql
+mysql -u root -p wpp_ingest < roll-up-tables.sql
 ```
 
 Eleven parser-written tables were read by no script at all - collected on every ingest, 4.2M
@@ -527,7 +523,7 @@ that: 93 seconds against four hours. Everything before phase 4c depends only on 
 ### 3b. Derive the spell timers
 
 ```
-mysql -u root -p wpp_ingest2 < spell-timers.sql
+mysql -u root -p wpp_ingest < spell-timers.sql
 ```
 
 Turns raw `creature_spell_cast` rows into `st_timer`, one min/max pair per creature entry and
@@ -546,7 +542,7 @@ measures aggro to first cast, says more than any repeat interval does.
 ### 3c. Curate the casts and publish them
 
 ```
-mysql -u root -p wpp_ingest2 < curate-spell-casts.sql
+mysql -u root -p wpp_ingest < curate-spell-casts.sql
 ```
 
 `st_timer` is the working table; this is the one that leaves the database. It strips three things

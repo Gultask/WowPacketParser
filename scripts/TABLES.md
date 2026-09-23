@@ -20,22 +20,21 @@ the only tables that cannot be rebuilt without re-reading the sniffs, which take
 | `map_validity` | target × map | which branches' terrain matches 3.3.5, and what rebuilt the rest |
 | `creature_spawn` | sniff × creature | position, level, faction, flags. Dead creatures excluded. |
 | `gameobject_spawn` | sniff × gameobject | position and rotation quaternion |
-| `creature_waypoint` | move order point | the big one — destinations, not pathfinding filler. **No summon gate**; see below |
+| `creature_waypoint` | move order point | the big one — destinations, not pathfinding filler. Segments sent in combat are dropped, the rest of the creature's walk kept |
 | `creature_movement` | sniff × creature | movement reduced to a centre and a radius |
 | `loot_instance` / `loot_instance_item` | loot opened | empty loots kept on purpose: they are the denominator |
 | `creature_spell_cast` | SMSG_SPELL_START | raw; the gap between two is the cooldown observation |
 | `spell_target` | sniff × spell × target entry | what an entry-targeted spell actually hit; players are entry 0, `self_hits` counts hits on the caster |
 | `spell_destination` | sniff × spell × point | where a ground-targeted spell was aimed |
-| `creature_equip` | sniff × creature | the three virtual item slots |
-| `creature_aura` | sniff × creature × spell | mostly the player's own debuffs; `entry-auras.sql` sorts them |
+| `creature_equip` | entry × map × branch × item set | the three virtual item slots; merged, see below |
 | `gossip_menu` / `gossip_menu_option` / `npc_text` | menu, option, text | as the server sent them |
 | `areatrigger_teleport` | trigger paired to a world change | `delay_ms` says how much to trust the pairing |
 | `npc_vendor` | sniff × vendor × slot | the list as the player was shown it |
 | `npc_spellclick` | sniff × creature × spell | click paired to the cast it produced |
 | `creature_template_spell` | sniff × creature × slot | the action bar of a controlled creature |
-| `creature_quest_item` | sniff × creature × index | quest drops from the creature query response |
+| `creature_quest_item` | entry × branch × index | quest drops from the creature query response; merged |
 | `creature_gossip` | sniff × creature × menu | which menu a creature opened with |
-| `creature_value` | sniff × entry × map × field × value | faction, speeds, resistances, combat reach, bounding radius, attack times, mount, npc flags, level, model, unit flags, emote and stand state |
+| `creature_value` | entry × map × branch × field × value | merged; faction, speeds, resistances, combat reach, bounding radius, attack times, mount, npc flags, level, model, unit flags, emote and stand state |
 | `creature_template` | sniff × entry | the static half, stated by the query response |
 | `creature_template_model` | sniff × entry × index | display ids, variable in number |
 | `creature_aggro` | hostile AI reaction | one row per pull, not per creature |
@@ -43,8 +42,29 @@ the only tables that cannot be rebuilt without re-reading the sniffs, which take
 | `creature_armor` | sniff × victim entry × state | clean-hit damage sums; the ratio is armor reduction |
 | `creature_xp` | sniff × entry × both levels | kill XP before the rested bonus |
 | `creature_stats` | sniff × entry × stat sheet | the owner-only paperdoll: damage range, attack power, stats, all seven resistances |
+| `gameobject_template` / `gameobject_quest_item` | entry × branch × distinct answer | the gameobject query response; merged |
+| `trainer` / `npc_trainer` | trainer, and creature × trainer × spell × cost | trainer lists, tied to the creature through the gossip option that opened them; merged |
+| `gossip_poi` | poi × branch × distinct answer | map pins from guard and innkeeper options, with the option where known; merged |
+| `quest_poi` / `quest_poi_point` | quest × blob, and point | the quest map blobs and their outlines; merged |
 
-### These belong to the entry, but they are recorded per guid
+### Merged tables count sniffs instead of repeating them
+
+`creature_value`, `creature_equip`, `creature_quest_item` and every table added with them hold
+one row per distinct thing across the corpus: branch in the key where the sniff id was, and a
+`sniffs` count, `first_build` and `last_build`. The same faction on the same entry used to be a
+row in every sniff that saw it, and `creature_value` was one of the largest tables for it. Counts
+(`guids`, `observations`) are summed as sniffs arrive, so `entry-values.sql` and
+`roll-up-tables.sql` read the same totals they used to add up themselves.
+
+A sniff adds to them once. Rows cannot be taken back out, so re-ingesting a sniff whose
+`sniff_coverage` already names the capability leaves them alone, and rebuilding one means
+emptying it and ingesting again. Tables too wide to key on their values - templates, POIs - key
+on `variant`, an MD5 of the rest of the row, so two builds that answer differently keep a row each.
+
+`creature_value.unit_flags` is stored without the in-combat bit (0x80000). The waypoint
+collector reads that bit straight off the update stream instead.
+
+### These belong to the entry, but they are counted per guid
 
 The question worth asking is what values an *entry* accepts, and `entry-values.sql` answers it
 by rolling `creature_value` up into `entry_value` and `entry_value_best`. The rollup counts
@@ -52,9 +72,8 @@ DISTINCT guid, never rows: a creature standing in view for an hour resends its f
 update block while another sends it once, and counting rows would let the first outvote the
 second.
 
-The per-guid rows are what make the rollup honest, which is why storage stays at that grain.
-Two guids of one entry disagreeing is the signal that a field is conditional, and it is invisible
-the moment guids are merged. `entry_value_best.verdict` reports it: **settled** (every guid
+Distinct guids are what make the rollup honest, which is why the count stays at that grain.
+Two guids of one entry disagreeing is the signal that a field is conditional. `entry_value_best.verdict` reports it: **settled** (every guid
 agreed), **dominant** (at least 80%), **split** (less). On one 3.4.0 capture, 968 entries:
 
 | field | settled | dominant | split |
@@ -110,9 +129,8 @@ row here and a row from the text dump agree. What is left is 5 bits and **21 dis
 and 375,000 rows collapse into their neighbours. `unit_flags2` goes 93 to 15 and `unit_flags3`
 53 to 37.
 
-`creature_value` keeps the raw value. `entry-values.sql` is the answer, `creature_value` is the
-evidence, and one of the runtime bits it preserves - `PlayerControlled` - is what
-`entry-auras.sql` uses to recognise a pet.
+`creature_value` keeps the raw value, less the in-combat bit. `entry-values.sql` is the answer,
+`creature_value` is the evidence.
 
 `creature_spawn` no longer carries `faction`, `level`, `unit_flags`, `emote_state`,
 `stand_state` or `sheathe_state`. Those were never the spawn's values in the first place: the
@@ -151,78 +169,9 @@ stored object, so an aura that changes speed mid-sniff does not appear here. Tha
 value for `creature_template.speed_run` - the base before buffs - but it is not every speed the
 creature had.
 
-### Most of `creature_aura` is the sniffer's own debuffs
-
-Of the 335,607 entry-and-spell pairs in the corpus, **7.4% are a creature's own**. The
-widest-spread auras on creatures are Winter's Chill on 2,420 entries, Frost Fever on 2,235,
-Corruption on 1,989: one warlock's damage over time, following them from mob to mob for a whole
-capture. Anything reading the table raw as "auras this creature has" is reading a combat log.
-
-`entry-auras.sql` sorts them into `spell_aura` (what a spell is, corpus-wide) and `entry_aura`
-(what an entry carries), on four signals. None of the four is sufficient alone, and each one is
-there because it catches something the others miss:
-
-| signal | catches | misses |
-|---|---|---|
-| never carried a duration | ordinary DoTs and buffs | Savage Combat, permanent on all 39,308 sightings |
-| the packet named the caster | Savage Combat, Shadow Embrace, Blood Frenzy | only trustworthy on WotLK and TBC (below) |
-| `SpellFamilyName` is a class, consumable or pet talent | anything on a branch with no caster | creature abilities are family 0, so it says nothing about them |
-| `UNIT_FLAG_PLAYER_CONTROLLED` on the entry | pet scaling auras, which pass all three others | nothing else; it is an entry-level fact |
-
-A spell judged on trusted evidence anywhere in the corpus is judged everywhere, which is what
-lets the caster signal reach branches that cannot supply it.
-
-**The caster column is only trustworthy on WotLK and TBC, and collector version 1 did not say
-so.** Eleven call sites across nine version modules read the aura's caster into the protobuf
-entry and never onto the `Aura` object, so `CasterGuid` was null on every branch but TBC - and
-the collector read null as "no caster was sent, therefore the creature cast it". Cata, MoP,
-Retail and Classic came out **100.0% self-cast**. Where the caster does survive the column is
-excellent: across 58,147 WotLK sightings of eight known player DoTs, not one is marked
-self-cast. Collector version 2 assigns `CasterGuid` in those modules and records **2 for "the
-packet did not say"**, so the failure can no longer hide as an answer; `entry-auras.sql` trusts
-version 2 on any branch and version 1 only on WotLK and TBC.
-
-| `entry_aura.verdict` | pairs | |
-|---|---:|---|
-| `player` | 260,693 | someone else cast it |
-| `pet` | 27,831 | the entry is a summon, whatever it is carrying |
-| `combat` | 19,346 | its own, but seen with a duration, so it cast it during a fight |
-| **`addon`** | **24,666** | **its own and never timed - the creature_addon candidates** |
-| `unknown` | 3,071 | no trusted sniff ever saw it |
-
-**`addon` is the only one of the five worth publishing**, and 23,313 of its 24,666 rows have a
-WotLK or TBC sniff behind them. The list it produces reads like `creature_template_addon` should:
-a Wild Flower with a grow visual, a Pyrite Safety Container with a parachute, a Living Poison
-with Invisibility and Stealth Detection, a Glacier Penguin with Creature Random Size.
-
-Twenty known player spells - Corruption, Immolate, Shadow Word: Pain, Frost Fever, Winter's
-Chill, Sunder Armor and the rest - cover 28,158 entry pairs between them. All 28,158 come out
-`player` or `pet`, and **none reaches `addon`**. That is the test worth re-running after any
-change to the four signals.
-
-### `creature_spell_cast` and `creature_aura` are not the same table
-
-They overlap, and the overlap is the useful part. On that capture:
-
-| | count |
-|---|---:|
-| distinct guid+spell as an aura | 5,844 |
-| distinct guid+spell as a cast | 2,086 |
-| in both | 888 |
-| auras that guid was never seen casting | 4,956 |
-| on-create permanent auras | 2,486 |
-
-An aura the creature was seen casting is a combat buff it applies to itself, so it does **not**
-belong in `creature_template_addon.auras`; the 4,956 it was never seen casting are the
-candidates, and the 2,486 permanent on-create ones are the strongest of those. The join between
-the two tables is what tells them apart, which is exactly why both are kept.
-
-The cast table also holds 4,642 raw events behind those 2,086 distinct pairs. That surplus is
-the timing - the gaps a cooldown is read from - and the aura table cannot supply it at all.
-
 ### `creature_waypoint` never learned about summons
 
-`IsTemporarySpawn()` - pets, guardians, totems, anything with `CreatedBySpell` - gates
+**Fixed in collector version 3**; kept for the numbers. `IsTemporarySpawn()` - pets, guardians, totems, anything with `CreatedBySpell` - gates
 `CollectCreatureSpawns` and the gameobject collector. `CollectCreatureWaypoints` does not call
 it, so a creature the pipeline has already decided is not world content still contributes every
 move order it made:
@@ -394,7 +343,6 @@ Re-running the script drops and recreates these, so losing them costs only time.
 | `dg_spawn`, `dg_est`, `dg_approx`, `dg_fixed`, `dg_inst_rad`, `dg_rad_key`, `dg_path_span`, `dg_route_pt`, `dg_state` | `build-digest.sql` | ~4 h |
 | `co2_recovered`, `co2_recovered_build` | `recover-co2.sql` | ~1 min. **Additive, not dropped** - they are the record of which rows it changed, and deleting them loses the ability to undo it. |
 | `entry_value`, `entry_value_best`, `spell_initial_gap`, `spell_initial_timer`, `waypoint_segment_speed`, `entry_travel_mode` | `entry-values.sql` | minutes |
-| `aura_trusted_sniff`, `entry_controlled`, `spell_aura`, `entry_aura` | `entry-auras.sql` | ~7 min |
 | `st_gap`, `st_timer` | `spell-timers.sql` | ~5 min |
 | `entry_equip`, `entry_model`, `entry_vendor`, `entry_quest_item`, `entry_action_spell`, `entry_gossip_menu`, `menu_text`, `menu_option`, `text_line`, `at_teleport`, `entry_spell_target` | `roll-up-tables.sql` | ~1 min |
 
@@ -485,14 +433,17 @@ belongs in a script before the session ends. `spell-timers.sql` exists because o
 
 ## Rebuilding
 
-The current run writes to **`wpp_ingest2`**, not `wpp_ingest`. That is deliberate:
+The final run writes to **`wpp_ingest`**, created fresh. The DDL is `CREATE TABLE IF NOT EXISTS`,
+so an existing table would silently keep its old shape, and the merged tables cannot be rebuilt
+in place.
 
-- `sniff_map` gained columns (`packets`, `gated_packets`, `creature_spells`) and the DDL is
-  `CREATE TABLE IF NOT EXISTS`, so an existing table would silently keep the old shape.
-- The old database stays queryable, and the published digest keeps working, while the new one
-  is checked.
+Run it with one parser thread, which `ingest-sniffs.ps1` now defaults to. Collectors that read
+the parser's `Storage` depend on the order packets were parsed in, and with more than one thread
+spawn areas and gameobject phases came out different on every run; one thread costs nothing
+measurable, because the database writes are the bottleneck.
 
 One thing the rebuild gets back for free: `distill-waypoints.sql` permanently deleted 12.8M
 waypoints belonging to 106,437 creatures, and `build-digest.sql` measures its spawn radius from
-waypoints where it has them. Those come back in `wpp_ingest2`. Per `PIPELINE.md`, run
+waypoints where it has them. Those come back, and so do the patrols of every creature that ever
+fought, which the old aggro gate dropped for the whole capture. Per `PIPELINE.md`, run
 `build-digest.sql` **before** any re-distillation this time, and keep its radius output.

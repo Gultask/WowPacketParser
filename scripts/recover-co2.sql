@@ -73,7 +73,7 @@
 -- rebuilt none of this reaches the module.
 -- =========================================================================================
 
-USE wpp_ingest2;
+USE wpp_ingest;
 
 SET @tolerance = 2;
 

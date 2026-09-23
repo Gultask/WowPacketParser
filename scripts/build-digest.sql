@@ -15,7 +15,7 @@ SET SESSION sort_buffer_size = 67108864;
 -- Only sniff.file_hash and aggregate counts cross into the digest, which lands in acore_world
 -- as sniff_* tables so the module can read it through WorldDatabase with no extra connection.
 --
---   mysql -uroot -proot wpp_ingest2 < scripts/build-digest.sql
+--   mysql -uroot -proot wpp_ingest < scripts/build-digest.sql
 --
 -- Accuracy is the whole point of the digest, so it is a first-class column, and every level
 -- of it is something the corpus PROVES rather than something inferred from absence:

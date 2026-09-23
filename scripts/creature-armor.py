@@ -21,7 +21,7 @@ is the closest, and it is used only where no creature ever hit the entry.
 import sys, subprocess
 from collections import defaultdict
 
-DB = sys.argv[1] if len(sys.argv) > 1 else 'wpp_ingest2'
+DB = sys.argv[1] if len(sys.argv) > 1 else 'wpp_ingest'
 MIN_SWINGS = int(sys.argv[2]) if len(sys.argv) > 2 else 8
 
 # MOD_RESISTANCE, MOD_RESISTANCE_PCT, MOD_BASE_RESISTANCE_PCT, MOD_RESISTANCE_EXCLUSIVE

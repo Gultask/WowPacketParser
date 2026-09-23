@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from importlib import import_module
 read_dbc = import_module('read-dbc').read_dbc
 
-DB = sys.argv[1] if len(sys.argv) > 1 else 'wpp_ingest2'
+DB = sys.argv[1] if len(sys.argv) > 1 else 'wpp_ingest'
 MIN_KILLS = int(sys.argv[2]) if len(sys.argv) > 2 else 3
 DBC = sys.argv[3] if len(sys.argv) > 3 else r'C:\azerothcore-wotlk-build\bin\RelWithDebInfo\Data\dbc'
 

@@ -77,10 +77,11 @@ param(
     # Extra map ids to drop on top of the policy, comma separated.
     [string] $MapDeny = '',
 
-    # Parser worker threads; 0 means one per core. The work is not CPU parallel bound - two
-    # threads finish within about a tenth of the time all twelve do - so capping this leaves the
-    # machine usable for other things at almost no cost to throughput.
-    [int] $Threads = 0,
+    # Parser worker threads; 0 means one per core. Leave it at 1. Collectors that read the
+    # parser's Storage depend on the order packets were parsed in, and with more than one thread
+    # creature auras, spawn areas and gameobject phases came out different on every run. The
+    # database writes are the bottleneck anyway: five samples took 41 s on 1 thread, 40-42 s on 4.
+    [int] $Threads = 1,
 
     # Regex matched against the file name. Instance sniffs are the expensive ones - a handful of
     # raid logs carry roughly a third of the corpus's packets while holding under a tenth of its

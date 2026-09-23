@@ -19,7 +19,7 @@
 -- Cheap to rebuild, so every table is dropped and recreated. Run after entry-values.sql.
 -- =========================================================================================
 
-USE wpp_ingest2;
+USE wpp_ingest;
 
 SET SESSION tmp_table_size       = 2147483648;
 SET SESSION max_heap_table_size  = 2147483648;
@@ -42,7 +42,7 @@ CREATE TABLE entry_equip (
 
 INSERT INTO entry_equip
 SELECT e.entry, e.item_id1, e.item_id2, e.item_id3,
-       COUNT(DISTINCT e.sniff_id), COUNT(DISTINCT e.guid), s.sets
+       SUM(e.sniffs), SUM(e.guids), s.sets
 FROM   creature_equip e
 JOIN  (SELECT entry, COUNT(DISTINCT item_id1, item_id2, item_id3) AS sets
        FROM creature_equip GROUP BY entry) s ON s.entry = e.entry
@@ -118,7 +118,7 @@ CREATE TABLE entry_quest_item (
   PRIMARY KEY (entry, item_id)
 ) ENGINE=InnoDB;
 INSERT INTO entry_quest_item
-SELECT entry, item_id, COUNT(DISTINCT sniff_id) FROM creature_quest_item GROUP BY entry, item_id;
+SELECT entry, item_id, SUM(sniffs) FROM creature_quest_item GROUP BY entry, item_id;
 
 DROP TABLE IF EXISTS entry_action_spell;
 CREATE TABLE entry_action_spell (

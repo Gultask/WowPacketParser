@@ -1,7 +1,7 @@
 -- What values does a creature entry accept?
 --
--- `creature_value` already counts distinct guids within each sniff. This sums those counts
--- across the corpus, which is the shape the question wants.
+-- `creature_value` already counts distinct guids within each sniff, and the ingest sums those
+-- counts across the corpus as it goes. This folds map and branch away and votes.
 --
 -- Guids are the unit of evidence, not rows: one creature standing in view for an hour resends
 -- its faction on every update block while another sends it once, and the ingest collapsed that
@@ -65,11 +65,11 @@ SELECT v.entry,
        v.value,
        SUM(v.guids)                                                     AS guid_obs,
        SUM(v.on_create_guids)                                           AS on_create_obs,
-       MAX(v.changed_guids)                                             AS changed_obs,
-       COUNT(DISTINCT v.sniff_id)                                       AS sniffs,
-       GROUP_CONCAT(DISTINCT s.branch ORDER BY s.branch SEPARATOR ',')  AS branches,
+       SUM(v.changed_guids)                                             AS changed_obs,
+       SUM(v.sniffs)                                                    AS sniffs,
+       GROUP_CONCAT(DISTINCT v.branch ORDER BY v.branch SEPARATOR ',')  AS branches,
        SUM(v.guids) / t.total_obs                                       AS guid_share
-FROM   (SELECT sniff_id, entry, field, guids, on_create_guids, changed_guids,
+FROM   (SELECT branch, sniffs, entry, field, guids, on_create_guids, changed_guids,
                CASE field
                  WHEN 'unit_flags'  THEN CAST(value AS UNSIGNED) &   33555266
                  WHEN 'unit_flags2' THEN CAST(value AS UNSIGNED) &   67307554
@@ -77,7 +77,6 @@ FROM   (SELECT sniff_id, entry, field, guids, on_create_guids, changed_guids,
                  ELSE value
                END AS value
         FROM   creature_value) v
-JOIN   sniff s ON s.id = v.sniff_id
 JOIN   (SELECT entry, field, SUM(guids) AS total_obs
         FROM   creature_value
         GROUP  BY entry, field) t

@@ -9,7 +9,7 @@
 #   DB=other-database ./mine-paths.sh
 set -euo pipefail
 
-DB=${DB:-wpp_ingest2}
+DB=${DB:-wpp_ingest}
 MYSQL="mysql -u root -proot --local-infile=1"
 WORK="${1:-/c/WowPacketParser/scripts/.paths}"
 HERE="$(cd "$(dirname "$0")" && pwd)"

@@ -8,7 +8,7 @@ SET SESSION sort_buffer_size = 67108864;
 -- ===========================================================================================
 -- publish-loot.sql - build the publishable loot and gameobject tables.
 --
--- Reads wpp_ingest2, writes sniff_* into acore_world beside the creature digest, so the whole
+-- Reads wpp_ingest, writes sniff_* into acore_world beside the creature digest, so the whole
 -- published dataset lives in one schema and publishing is one command:
 --   mysqldump acore_world sniff_names sniff_loot_set sniff_loot_item sniff_gameobject_point > loot.sql
 -- (sniff_loot is a view over sniff_loot_set and comes along with --routines off; dump it too if the
@@ -29,7 +29,7 @@ SET SESSION sort_buffer_size = 67108864;
 -- available evidence, not a recording of the original client.
 -- ===========================================================================================
 
-USE wpp_ingest2;
+USE wpp_ingest;
 
 -- -------------------------------------------------------------------------------------------
 -- Phase 0: destroy the character guids.

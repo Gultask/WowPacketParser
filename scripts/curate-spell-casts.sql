@@ -39,7 +39,7 @@
 -- REVERSIBILITY
 --
 -- Everything here is built from scratch each run. The only objects written
--- outside wpp_ingest2 are acore_world.sniff_creature_spell and the view
+-- outside wpp_ingest are acore_world.sniff_creature_spell and the view
 -- acore_world.sniff_creature_smartai, both dropped and recreated.
 -- =============================================================================
 
