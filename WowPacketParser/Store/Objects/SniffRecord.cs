@@ -13,6 +13,7 @@ namespace WowPacketParser.Store.Objects
         public ulong Id;
 
         public string FileHash;
+        public string FileCrc32;
         public string FileName;
         public long? FileSize;
 

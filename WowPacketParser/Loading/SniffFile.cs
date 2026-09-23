@@ -2647,9 +2647,11 @@ namespace WowPacketParser.Loading
             var readFileName = _compression != FileCompression.None ? _tempName : FileName;
             var meta = _sniffMetadata ?? new SniffMetadata();
 
+            var hashes = HashFile(readFileName);
             var sniff = new SniffRecord
             {
-                FileHash = HashFile(readFileName),
+                FileHash = hashes.Sha256,
+                FileCrc32 = hashes.Crc32,
                 FileName = Path.GetFileName(FileName),
                 FileSize = new FileInfo(readFileName).Length,
                 Sniffer = meta.SnifferName,
@@ -2706,11 +2708,34 @@ namespace WowPacketParser.Loading
             return skew;
         }
 
-        private static string HashFile(string fileName)
+        private static readonly uint[] Crc32Table = Enumerable.Range(0, 256).Select(n =>
         {
-            using (var sha = System.Security.Cryptography.SHA256.Create())
-            using (var stream = File.OpenRead(fileName))
-                return Convert.ToHexString(sha.ComputeHash(stream)).ToLowerInvariant();
+            var c = (uint)n;
+            for (var k = 0; k < 8; k++)
+                c = (c & 1) != 0 ? 0xEDB88320 ^ (c >> 1) : c >> 1;
+            return c;
+        }).ToArray();
+
+        /// <summary>
+        /// SHA-256 and CRC-32 of the file, in one read. The CRC is what 7-Zip lists for every
+        /// member of an archive without unpacking it, so the ingest script can tell an archive is
+        /// already in the database from its listing alone; SHA-256 stays the row's identity.
+        /// </summary>
+        private static (string Sha256, string Crc32) HashFile(string fileName)
+        {
+            using var sha = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+            using var stream = File.OpenRead(fileName);
+            var buffer = new byte[1 << 20];
+            var crc = 0xFFFFFFFFu;
+            int read;
+            while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                sha.AppendData(buffer, 0, read);
+                for (var i = 0; i < read; i++)
+                    crc = Crc32Table[(crc ^ buffer[i]) & 0xFF] ^ (crc >> 8);
+            }
+
+            return (Convert.ToHexString(sha.GetHashAndReset()).ToLowerInvariant(), (~crc).ToString("x8"));
         }
 
         private void WriteSQLs(Packets packets)

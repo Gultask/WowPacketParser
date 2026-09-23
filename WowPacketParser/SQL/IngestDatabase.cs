@@ -99,7 +99,34 @@ namespace WowPacketParser.SQL
                 }
             }
 
+            // CREATE TABLE IF NOT EXISTS leaves a table that already exists alone, so columns added
+            // after a database was first built have to be put in by hand. Rows ingested before the
+            // column existed keep the default; only a re-ingest fills them in.
+            EnsureColumn("sniff", "file_crc32",
+                         "CHAR(8) NULL COMMENT 'CRC-32 as 7-Zip lists it, so an archive can be matched against this table without unpacking it' AFTER `file_size`");
+
             _schemaChecked = true;
+        }
+
+        /// <summary>Adds a column to an existing table if it is not there yet. Does nothing otherwise.</summary>
+        [SuppressMessage("Microsoft.Security", "CA2100", Justification = "Table, column and definition are compile time constants; the lookup uses parameters.")]
+        private static void EnsureColumn(string table, string column, string definition)
+        {
+            using (var cmd = _conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM information_schema.columns " +
+                                  "WHERE table_schema = DATABASE() AND table_name = @t AND column_name = @c;";
+                cmd.Parameters.AddWithValue("@t", table);
+                cmd.Parameters.AddWithValue("@c", column);
+                if (Convert.ToInt32(cmd.ExecuteScalar()) > 0)
+                    return;
+            }
+
+            using (var cmd = _conn.CreateCommand())
+            {
+                cmd.CommandText = $"ALTER TABLE `{table}` ADD COLUMN `{column}` {definition};";
+                cmd.ExecuteNonQuery();
+            }
         }
 
 
@@ -256,6 +283,7 @@ CREATE TABLE IF NOT EXISTS `sniff` (
   `file_hash`          CHAR(64)        NOT NULL,
   `file_name`          VARCHAR(512)    NOT NULL,
   `file_size`          BIGINT UNSIGNED NULL,
+  `file_crc32`         CHAR(8)         NULL COMMENT 'CRC-32 as 7-Zip lists it, so an archive can be matched against this table without unpacking it',
   `sniffer`            VARCHAR(64)     NULL,
   `sniffer_id`         INT             NULL,
   `sniffer_version`    INT             NULL,
@@ -623,13 +651,13 @@ CREATE TABLE IF NOT EXISTS `sniff_map` (
   COMMENT='Which maps a sniff touched and how much it yielded on each, so a later run can be scoped by map without opening the files again.';";
 
         private const string SniffUpsertSql = @"
-INSERT INTO `sniff` (file_hash, file_name, file_size, sniffer, sniffer_id, sniffer_version, pkt_version,
+INSERT INTO `sniff` (file_hash, file_name, file_size, file_crc32, sniffer, sniffer_id, sniffer_version, pkt_version,
                      client_build, client_version, client_locale, branch,
                      header_start_utc, first_packet_utc, last_packet_utc,
                      utc_offset_seconds, utc_offset_source, clock_skew_seconds,
                      packet_count, parsed_count, error_count, skipped_count, no_structure_count,
                      structure_version, ingested_at_utc)
-VALUES (@file_hash, @file_name, @file_size, @sniffer, @sniffer_id, @sniffer_version, @pkt_version,
+VALUES (@file_hash, @file_name, @file_size, @file_crc32, @sniffer, @sniffer_id, @sniffer_version, @pkt_version,
         @client_build, @client_version, @client_locale, @branch,
         @header_start_utc, @first_packet_utc, @last_packet_utc,
         @utc_offset_seconds, @utc_offset_source, @clock_skew_seconds,
@@ -639,6 +667,7 @@ ON DUPLICATE KEY UPDATE
     id                 = LAST_INSERT_ID(id),
     file_name          = VALUES(file_name),
     file_size          = VALUES(file_size),
+    file_crc32         = VALUES(file_crc32),
     sniffer            = VALUES(sniffer),
     sniffer_id         = VALUES(sniffer_id),
     sniffer_version    = VALUES(sniffer_version),
@@ -678,6 +707,7 @@ ON DUPLICATE KEY UPDATE
                     cmd.Parameters.AddWithValue("@file_hash", sniff.FileHash);
                     cmd.Parameters.AddWithValue("@file_name", sniff.FileName);
                     cmd.Parameters.AddWithValue("@file_size", sniff.FileSize);
+                    cmd.Parameters.AddWithValue("@file_crc32", sniff.FileCrc32);
                     cmd.Parameters.AddWithValue("@sniffer", sniff.Sniffer);
                     cmd.Parameters.AddWithValue("@sniffer_id", sniff.SnifferId);
                     cmd.Parameters.AddWithValue("@sniffer_version", sniff.SnifferVersion);

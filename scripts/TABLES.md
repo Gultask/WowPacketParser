@@ -13,7 +13,8 @@ the only tables that cannot be rebuilt without re-reading the sniffs, which take
 
 | table | one row per | notes |
 |---|---|---|
-| `sniff` | file | build, branch, packet counts, clock. Everything else hangs off `sniff_id`. |
+| `sniff` | file | build, branch, packet counts, clock. Everything else hangs off `sniff_id`. `file_crc32` is what 7-Zip lists, so `ingest-sniffs.ps1` can pass an archive over unopened. |
+| `ingest_archive` | archive inside an archive | written by `ingest-sniffs.ps1`, not the parser: nested archives that finished, by the CRC their parent lists |
 | `sniff_map` | sniff × map | yield per map, plus the packet census and how many were gated |
 | `sniff_coverage` | sniff × capability | what this sniff *could* give up; see below |
 | `map_validity` | target × map | which branches' terrain matches 3.3.5, and what rebuilt the rest |
