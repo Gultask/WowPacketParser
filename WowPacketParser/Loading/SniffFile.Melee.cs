@@ -29,6 +29,7 @@ namespace WowPacketParser.Loading
             // Constant for the unit's life, so read from Storage once.
             public bool Resolved;
             public uint Map;
+            public uint Zone;
             public string Owner = "";
         }
 
@@ -79,7 +80,10 @@ namespace WowPacketParser.Loading
             if (unit.Level > 0)
                 state.Level = (uint)unit.Level.Value;
             if (unit.Resistances.Count > 0 && unit.Resistances[0]?.Value != null)
+            {
                 state.Armor = (int)unit.Resistances[0].Value.Value;
+                NoteOwnArmor(guid, key);
+            }
             if (unit.AttackRoundBaseTime.Count > 0 && unit.AttackRoundBaseTime[0]?.Value > 0)
                 state.AttackTime0 = unit.AttackRoundBaseTime[0].Value.Value;
             if (unit.AttackRoundBaseTime.Count > 1 && unit.AttackRoundBaseTime[1]?.Value > 0)
@@ -137,6 +141,7 @@ namespace WowPacketParser.Loading
             {
                 state.Resolved = true;
                 state.Map = obj.Map;
+                state.Zone = (uint)Math.Max(obj.Zone, 0);
                 if (obj is Unit owned)
                     state.Owner = OwnerType(owned);
             }

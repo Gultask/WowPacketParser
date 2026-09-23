@@ -55,4 +55,26 @@ namespace WowPacketParser.Store.Objects
         public int DebugSwings;
         public long DebugArmorReductionSum;
     }
+
+    /// <summary>
+    /// Kill experience per victim entry and the two levels that decide it, from SMSG_LOG_XP_GAIN.
+    /// </summary>
+    public sealed class CreatureXpRecord
+    {
+        public ulong SniffId;
+        public uint Entry;
+        public uint Map;
+        public uint Zone;
+        public uint Level;
+        public uint PlayerLevel;
+        public string Owner;
+        public float GroupBonus;
+
+        public readonly HashSet<string> Guids = new();
+        public int Kills;
+        public int AmountMin = int.MaxValue;
+        public int AmountMax = int.MinValue;
+        public long AmountSum;
+        public long OriginalSum;
+    }
 }

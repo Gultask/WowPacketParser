@@ -6,7 +6,7 @@ namespace WowPacketParser.SQL
 {
     public static partial class IngestDatabase
     {
-        // Both tables take a surrogate key. The natural one runs through a 512-character aura list,
+        // These tables take a surrogate key. The natural one runs through a 512-character aura list,
         // and InnoDB copies the primary key into every secondary index: rows cost 500 to 850 bytes
         // that way against well under a hundred of actual data.
 
@@ -97,6 +97,44 @@ CREATE TABLE IF NOT EXISTS `creature_armor` (
             }).ToList();
 
             return SaveRows("creature_armor", sniffId, CreatureArmorColumns, rows, 1000);
+        }
+
+        private const string CreatureXpTableDdl = @"
+CREATE TABLE IF NOT EXISTS `creature_xp` (
+  `id`              BIGINT UNSIGNED   NOT NULL AUTO_INCREMENT,
+  `sniff_id`        BIGINT UNSIGNED   NOT NULL,
+  `entry`           INT UNSIGNED      NOT NULL,
+  `map`             INT UNSIGNED      NOT NULL,
+  `zone`            INT UNSIGNED      NOT NULL COMMENT 'with map, decides the content bracket and so the base XP',
+  `owner`           VARCHAR(8)        NOT NULL COMMENT 'as in creature_melee',
+  `level`           SMALLINT UNSIGNED NOT NULL COMMENT 'the victim''s, at the kill',
+  `player_level`    SMALLINT UNSIGNED NOT NULL COMMENT 'the sniffer''s, at the kill; 0 if never seen',
+  `group_bonus`     FLOAT             NOT NULL COMMENT 'the packet''s group rate; 1 alone or in a pair, so it cannot tell those apart',
+  `guids`           INT               NOT NULL,
+  `kills`           INT               NOT NULL,
+  `amount_min`      INT               NOT NULL COMMENT 'XP before the rested bonus',
+  `amount_max`      INT               NOT NULL,
+  `amount_sum`      BIGINT            NOT NULL,
+  `original_sum`    BIGINT            NOT NULL COMMENT 'XP received, rested bonus included',
+  PRIMARY KEY (`id`),
+  KEY `ix_cxp_entry` (`entry`, `level`),
+  CONSTRAINT `fk_cxp_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Kill XP from SMSG_LOG_XP_GAIN with the levels that set it. Against the level formula the ratio is ExperienceModifier, doubled for elites.';";
+
+        private const string CreatureXpColumns =
+            "entry, map, zone, owner, level, player_level, group_bonus, guids, kills, amount_min, amount_max, " +
+            "amount_sum, original_sum";
+
+        public static int SaveCreatureXp(ulong sniffId, IReadOnlyList<CreatureXpRecord> xp)
+        {
+            var rows = xp.Select(x => new object[]
+            {
+                x.Entry, x.Map, x.Zone, x.Owner, x.Level, x.PlayerLevel, x.GroupBonus, x.Guids.Count, x.Kills,
+                x.AmountMin, x.AmountMax, x.AmountSum, x.OriginalSum
+            }).ToList();
+
+            return SaveRows("creature_xp", sniffId, CreatureXpColumns, rows, 1000);
         }
     }
 }

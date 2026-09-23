@@ -337,6 +337,12 @@ namespace WowPacketParser.Loading
                             if (_dumpFormat == DumpFormatType.Database && packet.Holder.AttackerStateUpdate != null)
                                 FoldMelee(packet.Holder);
 
+                            if (_dumpFormat == DumpFormatType.Database && packet.Holder.LogXpGain != null)
+                                FoldExperience(packet.Holder.LogXpGain);
+
+                            if (_dumpFormat == DumpFormatType.Database && packet.Holder.PlayerLogin != null)
+                                NotePlayerLogin(packet.Holder.PlayerLogin);
+
                             if (_dumpFormat.IsUniversalProtobufType() || movementEnabled || HotfixSettings.Instance.ShouldLog())
                             {
                                 if (_dumpFormat.IsUniversalProtobufType() || HotfixSettings.Instance.ShouldLog())
@@ -857,6 +863,13 @@ namespace WowPacketParser.Loading
                                       meleeWritten, Opcode.SMSG_ATTACKER_STATE_UPDATE));
                 coverage.Add(Coverage(CollectorVersion.CreatureArmor, CollectorVersion.CreatureArmorVersion,
                                       armorWritten, Opcode.SMSG_ATTACKER_STATE_UPDATE));
+
+                var xp = CollectCreatureXp(sniffId);
+                var xpWritten = IngestDatabase.SaveCreatureXp(sniffId, xp);
+                if (xp.Count > 0)
+                    Trace.WriteLine($"{_logPrefix}: {xp.Sum(x => x.Kills)} kill XP gains in {xpWritten} rows recorded");
+                coverage.Add(Coverage(CollectorVersion.CreatureXp, CollectorVersion.CreatureXpVersion,
+                                      xpWritten, Opcode.SMSG_LOG_XP_GAIN));
 
                 var teleports = CollectAreaTriggerTeleports(sniffId, packets);
                 var teleWritten = IngestDatabase.SaveAreaTriggerTeleports(sniffId, teleports);

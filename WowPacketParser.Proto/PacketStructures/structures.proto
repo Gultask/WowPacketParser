@@ -83,6 +83,7 @@ message PacketHolder {
       PacketInitWorldStates initWorldStates = 47;
       PacketUpdateWorldState updateWorldState = 48;
       PacketAttackerStateUpdate attackerStateUpdate = 49;
+      PacketLogXpGain logXpGain = 50;
   }
 }
 
@@ -948,4 +949,14 @@ message AttackSubDamage {
   int32 intDamage = 3;
   int32 absorbed = 4;
   int32 resisted = 5;
+}
+
+// Experience from SMSG_LOG_XP_GAIN. For a kill, amount is the XP before the rested bonus and
+// original the total the player received.
+message PacketLogXpGain {
+  UniversalGuid victim = 1;
+  int32 original = 2;
+  uint32 reason = 3;
+  int32 amount = 4;
+  float groupBonus = 5;
 }

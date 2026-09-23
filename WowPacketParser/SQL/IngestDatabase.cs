@@ -90,7 +90,7 @@ namespace WowPacketParser.SQL
                                         CreatureGossipTableDdl, CreatureValueTableDdl,
                                         CreatureAggroTableDdl, CreatureTemplateTableDdl,
                                         CreatureTemplateModelTableDdl, CreatureMeleeTableDdl,
-                                        CreatureArmorTableDdl })
+                                        CreatureArmorTableDdl, CreatureXpTableDdl })
             {
                 using (var cmd = _conn.CreateCommand())
                 {

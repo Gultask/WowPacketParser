@@ -40,6 +40,7 @@ the only tables that cannot be rebuilt without re-reading the sniffs, which take
 | `creature_aggro` | hostile AI reaction | one row per pull, not per creature |
 | `creature_melee` | sniff × entry × swing state | every landed `OriginalDamage` as a JSON array; auras in the key |
 | `creature_armor` | sniff × victim entry × state | clean-hit damage sums; the ratio is armor reduction |
+| `creature_xp` | sniff × entry × both levels | kill XP before the rested bonus |
 
 ### These belong to the entry, but they are recorded per guid
 
@@ -347,7 +348,15 @@ armor, which is sent: 72% of rows within 1%. Creature attackers measure creature
 armor penetration in the way; a player's reading can only be low. Treat armor as indicative -
 the inversion multiplies a 0.005 error in the reduction into about 2% of armor.
 
-Both are keyed by entry with a surrogate `id`, not by guid: the natural key ran through a
+`scripts/xp-modifier.py` does the same for `ExperienceModifier` with `creature_xp`. Kill XP runs
+at a player bonus - heirlooms and a +50% event put the druid levelling set at 1.70 of AC's
+formula - so the most common ratio over non-elite kills, per sniff and player level, is the 1.
+After that 211 of 231 WotLK entries agree with AC, and the ones that do not tend to carry the same
+scaling in their damage: Heckling Fel Sprite 0.40 XP and 0.42 damage, Sapphire Hive Drone 0.50
+and 0.51. The query response's `health_modifier` matches the damage multiplier less often than
+AC does - 367 of 502 normal mobs against 439 - so it is a hint, not a stand-in.
+
+All three are keyed by entry with a surrogate `id`, not by guid: the natural key ran through a
 512-character aura list that InnoDB copied into every index, at 500 to 850 bytes a row.
 
 ## 2. Script-derived — rebuildable, and dropped by their own script
