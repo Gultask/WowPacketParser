@@ -77,9 +77,9 @@
 
         public const int CreatureSpawnVersion = 3;   // 2 added emote/stand/sheathe state, 3 added health
         public const int GameObjectSpawnVersion = 2;   // 2 added the static rotation quaternion
-        public const int CreatureWaypointVersion = 3;   // 2 added segment point counts, 3 gates owned creatures
+        public const int CreatureWaypointVersion = 4;   // 2 added segment point counts, 3 gates owned creatures, 4 every create-block spline in a packet
         public const int LootVersion = 1;
-        public const int CreatureMovementVersion = 1;
+        public const int CreatureMovementVersion = 2;   // 2 sees update packets that carried a create-block spline
         public const int CreatureSpellVersion = 2;   // 2 reads SMSG_SPELL_START on TBC Anniversary
         public const int SpellTargetVersion = 2;   // 2 added player hits and self_hits
         public const int SpellDestinationVersion = 1;
@@ -92,7 +92,7 @@
         public const int CreatureTemplateSpellVersion = 1;
         public const int CreatureQuestItemVersion = 1;
         public const int CreatureGossipVersion = 1;
-        public const int CreatureValueVersion = 1;
+        public const int CreatureValueVersion = 2;   // 2 sees update packets that carried a create-block spline
         public const int CreatureAggroVersion = 1;
         public const int CreatureMeleeVersion = 1;
         public const int CreatureArmorVersion = 1;
