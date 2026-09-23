@@ -329,6 +329,7 @@ namespace WowPacketParser.Loading
                             {
                                 FoldCreatureValues(packet.Holder.UpdateObject);
                                 TrackUnitStates(packet.Holder.UpdateObject);
+                                TrackCombat(packet.Holder);
                             }
 
                             if (_dumpFormat == DumpFormatType.Database && packet.Holder.AuraUpdate != null)
@@ -774,13 +775,6 @@ namespace WowPacketParser.Loading
                 coverage.Add(Coverage(CollectorVersion.CreatureEquip, CollectorVersion.CreatureEquipVersion,
                                       equipWritten, Opcode.SMSG_UPDATE_OBJECT));
 
-                var creatureAuras = CollectCreatureAuras(sniffId);
-                var auraWritten = IngestDatabase.SaveCreatureAuras(sniffId, creatureAuras);
-                if (creatureAuras.Count > 0)
-                    Trace.WriteLine($"{_logPrefix}: {auraWritten} creature auras recorded");
-                coverage.Add(Coverage(CollectorVersion.CreatureAura, CollectorVersion.CreatureAuraVersion,
-                                      auraWritten, Opcode.SMSG_AURA_UPDATE));
-
                 var gossipMenus = CollectGossip(sniffId, packets, out var gossipOptions, out var npcTexts);
                 var gossipWritten = IngestDatabase.SaveGossipMenus(sniffId, gossipMenus);
                 IngestDatabase.SaveGossipMenuOptions(sniffId, gossipOptions);
@@ -846,6 +840,42 @@ namespace WowPacketParser.Loading
                     Trace.WriteLine($"{_logPrefix}: {modelWritten} creature display ids recorded");
                 coverage.Add(Coverage(CollectorVersion.CreatureTemplateModel, CollectorVersion.CreatureTemplateModelVersion,
                                       modelWritten, Opcode.SMSG_QUERY_CREATURE_RESPONSE));
+
+                var goTemplates = CollectGameObjectTemplates(out var goQuestItems);
+                var goTemplateWritten = IngestDatabase.SaveGameObjectTemplates(sniffId, goTemplates);
+                var goQuestItemWritten = IngestDatabase.SaveGameObjectQuestItems(sniffId, goQuestItems);
+                if (goTemplates.Count > 0)
+                    Trace.WriteLine($"{_logPrefix}: {goTemplates.Count} gameobject templates, {goQuestItems.Count} quest items");
+                coverage.Add(Coverage(CollectorVersion.GameObjectTemplate, CollectorVersion.GameObjectTemplateVersion,
+                                      goTemplateWritten, Opcode.SMSG_QUERY_GAME_OBJECT_RESPONSE));
+                coverage.Add(Coverage(CollectorVersion.GameObjectQuestItem, CollectorVersion.GameObjectQuestItemVersion,
+                                      goQuestItemWritten, Opcode.SMSG_QUERY_GAME_OBJECT_RESPONSE));
+
+                var trainerSpells = CollectNpcTrainers(out var trainers);
+                var trainerWritten = IngestDatabase.SaveTrainers(sniffId, trainers);
+                var trainerSpellWritten = IngestDatabase.SaveNpcTrainers(sniffId, trainerSpells);
+                if (trainerSpells.Count > 0)
+                    Trace.WriteLine($"{_logPrefix}: {trainers.Count} trainer lists, {trainerSpells.Count} trainer spells");
+                coverage.Add(Coverage(CollectorVersion.Trainer, CollectorVersion.TrainerVersion,
+                                      trainerWritten, Opcode.SMSG_TRAINER_LIST));
+                coverage.Add(Coverage(CollectorVersion.NpcTrainer, CollectorVersion.NpcTrainerVersion,
+                                      trainerSpellWritten, Opcode.SMSG_TRAINER_LIST));
+
+                var gossipPois = CollectGossipPois();
+                var gossipPoiWritten = IngestDatabase.SaveGossipPois(sniffId, gossipPois);
+                coverage.Add(Coverage(CollectorVersion.GossipPoi, CollectorVersion.GossipPoiVersion,
+                                      gossipPoiWritten, Opcode.SMSG_GOSSIP_POI));
+
+                var questPois = CollectQuestPois(out var questPoiPoints);
+                var questPoiWritten = IngestDatabase.SaveQuestPois(sniffId, questPois);
+                var questPoiPointWritten = IngestDatabase.SaveQuestPoiPoints(sniffId, questPoiPoints);
+                if (gossipPois.Count + questPois.Count > 0)
+                    Trace.WriteLine($"{_logPrefix}: {gossipPois.Count} gossip POIs, {questPois.Count} quest POIs " +
+                                    $"with {questPoiPoints.Count} points");
+                coverage.Add(Coverage(CollectorVersion.QuestPoi, CollectorVersion.QuestPoiVersion,
+                                      questPoiWritten, Opcode.SMSG_QUEST_POI_QUERY_RESPONSE));
+                coverage.Add(Coverage(CollectorVersion.QuestPoiPoint, CollectorVersion.QuestPoiPointVersion,
+                                      questPoiPointWritten, Opcode.SMSG_QUEST_POI_QUERY_RESPONSE));
 
                 var aggro = CollectCreatureAggro(sniffId, packets);
                 var aggroWritten = IngestDatabase.SaveCreatureAggro(sniffId, aggro);
@@ -1382,6 +1412,140 @@ namespace WowPacketParser.Loading
             return kept == null ? null : new PacketHolder { BaseData = holder.BaseData, UpdateObject = kept };
         }
 
+        private const uint UnitFlagInCombat = 0x00080000;
+
+        /// <summary>
+        /// Where each creature's in-combat bit went on and off, by packet number. Written on the
+        /// write stage, which sees packets in file order.
+        /// </summary>
+        private readonly Dictionary<string, List<(int Number, DateTime? Time, bool On)>> _combatEdges = new();
+
+        private void TrackCombat(PacketHolder holder)
+        {
+            var update = holder.UpdateObject;
+            var number = holder.BaseData?.Number ?? 0;
+            var time = holder.BaseData?.Time?.ToDateTime();
+
+            void Note(UniversalGuid guid, UpdateValues values)
+            {
+                if (guid == null || values == null ||
+                    (guid.Type != UniversalHighGuid.Creature && guid.Type != UniversalHighGuid.Vehicle))
+                    return;
+
+                long? flags = values.Fields?.Unit?.Flags;
+                if (flags == null && values.Legacy != null && values.Legacy.Ints.TryGetValue("UNIT_FIELD_FLAGS", out var legacy))
+                    flags = legacy;
+                if (flags == null)
+                    return;
+
+                var key = GuidKey(guid);
+                var on = (flags.Value & UnitFlagInCombat) != 0;
+                if (!_combatEdges.TryGetValue(key, out var edges))
+                    _combatEdges[key] = edges = new List<(int, DateTime?, bool)>();
+
+                if (edges.Count == 0 ? on : edges[edges.Count - 1].On != on)
+                    edges.Add((number, time, on));
+            }
+
+            foreach (var created in update.Created)
+                Note(created.Guid, created.Values);
+            foreach (var updated in update.Updated)
+                Note(updated.Guid, updated.Values);
+        }
+
+        /// <summary>
+        /// The stretches each creature spent fighting, as packet number ranges.
+        ///
+        /// The in-combat unit flag is the whole signal: it goes on at the pull and off a second
+        /// or so after the creature has walked back, so chase, evade and the walk home all land
+        /// inside it, and an escort's next leg lands just after. A hostile AI reaction that no
+        /// flag covers - a build that does not send it - opens a window that lasts until the flag
+        /// is next seen clear, or to the end of the sniff; that is the old whole-sniff gate, kept
+        /// only where nothing better exists.
+        /// </summary>
+        private Dictionary<string, List<(int From, DateTime? FromTime, int To)>> CombatWindows(Packets packets)
+        {
+            var windows = new Dictionary<string, List<(int, DateTime?, int)>>();
+
+            foreach (var pair in _combatEdges)
+            {
+                var list = new List<(int, DateTime?, int)>();
+                (int Number, DateTime? Time)? open = null;
+                foreach (var edge in pair.Value)
+                {
+                    if (edge.On)
+                        open = (edge.Number, edge.Time);
+                    else if (open != null)
+                    {
+                        list.Add((open.Value.Number, open.Value.Time, edge.Number));
+                        open = null;
+                    }
+                }
+
+                if (open != null)
+                    list.Add((open.Value.Number, open.Value.Time, int.MaxValue));
+
+                windows[pair.Key] = list;
+            }
+
+            foreach (var holder in packets.Packets_)
+            {
+                if (holder.AiReaction == null || holder.AiReaction.Reaction != Proto.AIReaction.Hostile)
+                    continue;
+
+                var key = GuidKey(holder.AiReaction.UnitGuid);
+                var number = holder.BaseData?.Number ?? 0;
+                if (key == null)
+                    continue;
+
+                if (!windows.TryGetValue(key, out var list))
+                    windows[key] = list = new List<(int, DateTime?, int)>();
+                if (list.Any(w => number >= w.Item1 && number <= w.Item3))
+                    continue;
+
+                var end = int.MaxValue;
+                if (_combatEdges.TryGetValue(key, out var edges))
+                {
+                    foreach (var edge in edges)
+                    {
+                        if (!edge.On && edge.Number > number)
+                        {
+                            end = edge.Number;
+                            break;
+                        }
+                    }
+                }
+
+                list.Add((number, holder.BaseData?.Time?.ToDateTime(), end));
+            }
+
+            return windows;
+        }
+
+        /// <summary>
+        /// A creature starts chasing a moment before the server flags it: its first chase orders
+        /// can arrive a couple of seconds ahead of the in-combat bit.
+        /// </summary>
+        private static readonly TimeSpan CombatLeadIn = TimeSpan.FromSeconds(2);
+
+        private static bool InCombat(Dictionary<string, List<(int From, DateTime? FromTime, int To)>> windows,
+                                     string key, int number, DateTime? time)
+        {
+            if (!windows.TryGetValue(key, out var list))
+                return false;
+
+            foreach (var w in list)
+            {
+                if (number >= w.From && number <= w.To)
+                    return true;
+                if (number < w.From && time != null && w.FromTime != null &&
+                    w.FromTime.Value - time.Value <= CombatLeadIn)
+                    return true;
+            }
+
+            return false;
+        }
+
         /// <summary>What each creature was drawn holding.</summary>
         /// <summary>
         /// The SQL outputs the ingest collectors read from.
@@ -1400,7 +1564,10 @@ namespace WowPacketParser.Loading
             UInt128 flags = 0;
             foreach (var output in new[] { SQLOutput.creature_template, SQLOutput.creature_template_gossip,
                                            SQLOutput.creature_spell_list, SQLOutput.npc_vendor,
-                                           SQLOutput.npc_spellclick_spells })
+                                           SQLOutput.npc_spellclick_spells, SQLOutput.gameobject_template,
+                                           SQLOutput.npc_trainer, SQLOutput.trainer,
+                                           SQLOutput.points_of_interest, SQLOutput.quest_poi,
+                                           SQLOutput.quest_poi_points })
                 flags |= ((UInt128)1) << (int)output;
 
             return flags;
@@ -1552,6 +1719,11 @@ namespace WowPacketParser.Loading
         {
             if (key == null || value == null)
                 return;
+
+            // In combat is the creature's state, not the entry's, and left in it doubled every
+            // unit_flags row. TrackCombat reads it for the waypoint collector.
+            if (field == "unit_flags")
+                value = (ulong)value.Value & ~(ulong)UnitFlagInCombat;
 
             var id = (key, field, value.Value);
             if (_creatureValues.TryGetValue(id, out var existing))
@@ -2133,107 +2305,6 @@ namespace WowPacketParser.Loading
             return equipment;
         }
 
-        /// <summary>
-        /// Auras seen on creatures. Auras present in the block that created the creature are
-        /// flagged, because those are the ones a spawn is meant to start with - anything added
-        /// later may be a player acting on it.
-        /// </summary>
-        private List<CreatureAuraRecord> CollectCreatureAuras(ulong sniffId)
-        {
-            var auras = new List<CreatureAuraRecord>();
-
-            foreach (var pair in Storage.Objects)
-            {
-                var obj = pair.Value.Item1;
-                if (obj.Type != ObjectType.Unit || obj is not Unit unit)
-                    continue;
-
-                var entry = obj.ObjectData?.EntryID;
-                if (entry == null || entry == 0)
-                    continue;
-
-                var guid = GuidKey(pair.Key);
-                var bySpell = new Dictionary<uint, CreatureAuraRecord>();
-
-                void Record(Aura aura, bool onCreate)
-                {
-                    if (aura == null || aura.SpellId == 0)
-                        return;
-
-                    if (!bySpell.TryGetValue(aura.SpellId, out var row))
-                    {
-                        bySpell[aura.SpellId] = row = new CreatureAuraRecord
-                        {
-                            SniffId = sniffId,
-                            Guid = guid,
-                            Entry = (uint)entry,
-                            Map = obj.Map,
-                            SpellId = aura.SpellId,
-                            Caster = CasterOf(aura, pair.Key)
-                        };
-                    }
-
-                    row.Observations++;
-                    if (onCreate)
-                        row.OnCreate = true;
-
-                    // The two readers disagree about which field is which: the legacy block puts
-                    // the total in MaxDuration and the time left in Duration, every module written
-                    // since puts them the other way round. The larger is the total either way.
-                    var total = Math.Max(aura.Duration, aura.MaxDuration);
-                    if (total > 0 && (row.DurationMs == null || total > row.DurationMs))
-                        row.DurationMs = total;
-                }
-
-                if (unit.Auras != null)
-                {
-                    foreach (var aura in unit.Auras)
-                        Record(aura, true);
-                }
-
-                if (unit.AddedAuras != null)
-                {
-                    foreach (var list in unit.AddedAuras)
-                    {
-                        if (list == null)
-                            continue;
-                        foreach (var aura in list)
-                            Record(aura, false);
-                    }
-                }
-
-                auras.AddRange(bySpell.Values);
-            }
-
-            return auras;
-        }
-
-        /// <summary>
-        /// Who put the aura there: 0 another unit, 1 the creature itself, 2 no idea.
-        ///
-        /// The NoCaster flag is the server saying "the caster is the target", and it is the only
-        /// answer available on every branch, so it is asked first. A guid is the next best thing.
-        /// When neither is present the answer is 2 and stays 2 - guessing self is how a whole
-        /// corpus came to claim that creatures cast Corruption on themselves.
-        /// </summary>
-        private static byte CasterOf(Aura aura, WowGuid unit)
-        {
-            var flags = aura.AuraFlags switch
-            {
-                AuraFlagMoP m => m.ToUniversal(),
-                AuraFlagClassic c => c.ToUniversal(),
-                AuraFlag a => a.ToUniversal(),
-                _ => UniversalAuraFlag.None
-            };
-
-            if (flags.HasFlag(UniversalAuraFlag.NoCaster))
-                return 1;
-
-            if (aura.CasterGuid == null || aura.CasterGuid.IsEmpty())
-                return 2;
-
-            return aura.CasterGuid == unit ? (byte)1 : (byte)0;
-        }
 
         /// <summary>Gossip menus, their options and the texts they point at.</summary>
         private List<GossipMenuRecord> CollectGossip(ulong sniffId, Packets packets,
@@ -2475,14 +2546,14 @@ namespace WowPacketParser.Loading
         }
 
         /// <summary>
-        /// Real waypoints for creatures that stayed out of combat.
+        /// Real waypoints, from creatures while they were out of combat.
         ///
         /// Three things are deliberately thrown away rather than flagged. The packedPoints array
         /// is delta compressed pathfinding filler, not server authored path, so it never becomes
-        /// a waypoint. Every segment belonging to a creature that aggroed anywhere in this sniff
-        /// is dropped, because chase and evade movement is not what the creature does when left
-        /// alone - which also removes almost all of the volume. And an owned creature contributes
-        /// nothing at all, on the same IsTemporarySpawn test the spawn collector uses.
+        /// a waypoint. Every segment a creature sent while in combat is dropped, because chase
+        /// and evade movement is not what it does when left alone; the rest of its walk is kept
+        /// (see CombatWindows). And an owned creature contributes nothing at all, on the same
+        /// IsTemporarySpawn test the spawn collector uses.
         /// </summary>
         private List<CreatureWaypointRecord> CollectCreatureWaypoints(ulong sniffId, Packets packets)
         {
@@ -2515,16 +2586,7 @@ namespace WowPacketParser.Loading
                     maps[GuidKey(pair.Key)] = pair.Value.Item1.Map;
             }
 
-            var aggroed = new HashSet<string>();
-            foreach (var holder in packets.Packets_)
-            {
-                if (holder.AiReaction != null && holder.AiReaction.Reaction == Proto.AIReaction.Hostile)
-                {
-                    var key = GuidKey(holder.AiReaction.UnitGuid);
-                    if (key != null)
-                        aggroed.Add(key);
-                }
-            }
+            var combat = CombatWindows(packets);
 
             var segmentId = 0;
 
@@ -2556,7 +2618,8 @@ namespace WowPacketParser.Loading
                     continue;
 
                 var key = GuidKey(move.Mover);
-                if (key == null || aggroed.Contains(key) || !maps.TryGetValue(key, out var map))
+                if (key == null || !maps.TryGetValue(key, out var map) ||
+                    InCombat(combat, key, holder.BaseData?.Number ?? 0, holder.BaseData?.Time?.ToDateTime()))
                     continue;
 
                 var points = new List<Vec3>(move.Points);

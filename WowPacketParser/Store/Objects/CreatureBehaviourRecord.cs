@@ -83,30 +83,6 @@ namespace WowPacketParser.Store.Objects
         public uint ItemId3;
     }
 
-    /// <summary>
-    /// An aura seen on a creature. Auras a creature carries on sight are the ones worth having -
-    /// they are the ones a spawn is meant to start with - so who cast it is recorded, letting
-    /// self-cast be told apart from something a player did to it.
-    /// </summary>
-    public sealed class CreatureAuraRecord
-    {
-        public ulong SniffId;
-        public string Guid;
-        public uint Entry;
-        public uint Map;
-        public uint SpellId;
-
-        /// <summary>0 someone else cast it, 1 the creature itself, 2 the packet did not say.</summary>
-        public byte Caster;
-
-        /// <summary>Set when the aura was in the first aura update seen for this guid.</summary>
-        public bool OnCreate;
-        public int Observations;
-
-        /// <summary>Longest total duration seen, null when the aura never carried one.</summary>
-        public int? DurationMs;
-    }
-
     /// <summary>A gossip menu as the server sent it, with the creature that opened it.</summary>
     public sealed class GossipMenuRecord
     {

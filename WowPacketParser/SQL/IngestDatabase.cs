@@ -82,7 +82,7 @@ namespace WowPacketParser.SQL
                                         SniffCoverageTableDdl, SniffMapTableDdl,
                                         CreatureMovementTableDdl, CreatureSpellCastTableDdl,
                                         SpellTargetTableDdl, SpellDestinationTableDdl,
-                                        CreatureEquipTableDdl, CreatureAuraTableDdl,
+                                        CreatureEquipTableDdl,
                                         GossipMenuTableDdl, GossipMenuOptionTableDdl,
                                         NpcTextTableDdl, AreaTriggerTeleportTableDdl,
                                         NpcVendorTableDdl, NpcSpellClickTableDdl,
@@ -90,7 +90,10 @@ namespace WowPacketParser.SQL
                                         CreatureGossipTableDdl, CreatureValueTableDdl,
                                         CreatureAggroTableDdl, CreatureTemplateTableDdl,
                                         CreatureTemplateModelTableDdl, CreatureMeleeTableDdl,
-                                        CreatureArmorTableDdl, CreatureXpTableDdl, CreatureStatsTableDdl })
+                                        CreatureArmorTableDdl, CreatureXpTableDdl, CreatureStatsTableDdl,
+                                        GameObjectTemplateTableDdl, GameObjectQuestItemTableDdl,
+                                        TrainerTableDdl, NpcTrainerTableDdl, GossipPoiTableDdl,
+                                        QuestPoiTableDdl, QuestPoiPointTableDdl })
             {
                 using (var cmd = _conn.CreateCommand())
                 {
@@ -178,19 +181,6 @@ CREATE TABLE IF NOT EXISTS `creature_template_spell` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   COMMENT='The action bar sent when a creature is controlled - mind control, charm or vehicle. The only place a creature spell list arrives whole and in slot order.';";
 
-        private const string CreatureQuestItemTableDdl = @"
-CREATE TABLE IF NOT EXISTS `creature_quest_item` (
-  `sniff_id` BIGINT UNSIGNED NOT NULL,
-  `entry`    INT UNSIGNED    NOT NULL,
-  `idx`      INT UNSIGNED    NOT NULL,
-  `item_id`  INT UNSIGNED    NOT NULL,
-  PRIMARY KEY (`sniff_id`, `entry`, `idx`),
-  KEY `ix_cqitem_entry` (`entry`),
-  KEY `ix_cqitem_item` (`item_id`),
-  CONSTRAINT `fk_cqitem_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-  COMMENT='Quest drops declared by the creature query response.';";
-
         private const string CreatureGossipTableDdl = @"
 CREATE TABLE IF NOT EXISTS `creature_gossip` (
   `sniff_id` BIGINT UNSIGNED NOT NULL,
@@ -202,24 +192,6 @@ CREATE TABLE IF NOT EXISTS `creature_gossip` (
   CONSTRAINT `fk_cgossip_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   COMMENT='Which gossip menu a creature opened with. One entry can have more than one, by condition.';";
-
-        private const string CreatureValueTableDdl = @"
-CREATE TABLE IF NOT EXISTS `creature_value` (
-  `sniff_id`        BIGINT UNSIGNED NOT NULL,
-  `entry`           INT UNSIGNED    NOT NULL,
-  `map`             INT UNSIGNED    NOT NULL,
-  `field`           VARCHAR(24)     NOT NULL,
-  `value`           DECIMAL(20,6)   NOT NULL COMMENT 'decimal so reaches, radii and speeds land exactly alongside the integer fields',
-  `guids`           INT UNSIGNED    NOT NULL COMMENT 'distinct creatures of this entry seen with this value',
-  `on_create_guids` INT UNSIGNED    NOT NULL COMMENT 'how many had it in the block that created them',
-  `changed_guids`   INT UNSIGNED    NOT NULL COMMENT 'guids of this entry and field seen with more than one value - a creature that changed, not two that differ',
-  `observations`    INT             NOT NULL,
-  PRIMARY KEY (`sniff_id`, `entry`, `map`, `field`, `value`),
-  KEY `ix_cvalue_entry` (`entry`, `field`, `value`),
-  KEY `ix_cvalue_field` (`field`, `value`),
-  CONSTRAINT `fk_cvalue_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-  COMMENT='What each entry was seen carrying, aggregated within the sniff. Counted by distinct guid because one creature standing in view resends its fields on every update block. Long format because none of these are constants. changed_guids separates a creature that changed from two that always differed. Resistances are PRIVATE|OWNER|SPECIAL_INFO, so their absence is not zero.';";
 
         private const string CreatureTemplateTableDdl = @"
 CREATE TABLE IF NOT EXISTS `creature_template` (
@@ -1005,38 +977,6 @@ CREATE TABLE IF NOT EXISTS `spell_destination` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   COMMENT='Where a spell was aimed when it was aimed at ground rather than a unit - the observations a spell_target_position row is built from.';";
 
-        private const string CreatureEquipTableDdl = @"
-CREATE TABLE IF NOT EXISTS `creature_equip` (
-  `sniff_id` BIGINT UNSIGNED NOT NULL,
-  `guid`     VARCHAR(40)     NOT NULL,
-  `entry`    INT UNSIGNED    NOT NULL,
-  `map`      INT UNSIGNED    NOT NULL,
-  `item_id1` INT UNSIGNED    NOT NULL,
-  `item_id2` INT UNSIGNED    NOT NULL,
-  `item_id3` INT UNSIGNED    NOT NULL,
-  PRIMARY KEY (`sniff_id`, `guid`),
-  KEY `ix_cequip_entry` (`entry`),
-  CONSTRAINT `fk_cequip_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-  COMMENT='Virtual items a creature was drawn holding: main hand, off hand, ranged.';";
-
-        private const string CreatureAuraTableDdl = @"
-CREATE TABLE IF NOT EXISTS `creature_aura` (
-  `sniff_id`        BIGINT UNSIGNED NOT NULL,
-  `guid`            VARCHAR(40)     NOT NULL,
-  `entry`           INT UNSIGNED    NOT NULL,
-  `map`             INT UNSIGNED    NOT NULL,
-  `spell_id`        INT UNSIGNED    NOT NULL,
-  `self_cast`       TINYINT          NOT NULL COMMENT '0 another unit cast it, 1 the creature itself, 2 the packet did not say',
-  `on_create`       TINYINT(1)      NOT NULL COMMENT 'was in the first aura update seen for this guid, which is usually but not always the spawn',
-  `observations`    INT             NOT NULL,
-  `max_duration_ms` INT             NULL COMMENT 'longest total duration seen; null means the aura never carried one, so it is permanent',
-  PRIMARY KEY (`sniff_id`, `guid`, `spell_id`),
-  KEY `ix_caura_entry` (`entry`, `spell_id`),
-  CONSTRAINT `fk_caura_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-  COMMENT='Auras seen on creatures, most of which a player put there. A permanent aura the creature cast on itself is creature_addon material; everything else is a fight in progress. scripts/curate.sql sorts them, and needs self_cast = 2 to stay honest - collector version 1 wrote 1 when it meant 2.';";
-
         private const string GossipMenuTableDdl = @"
 CREATE TABLE IF NOT EXISTS `gossip_menu` (
   `sniff_id`       BIGINT UNSIGNED NOT NULL,
@@ -1184,17 +1124,6 @@ CREATE TABLE IF NOT EXISTS `areatrigger_teleport` (
             return SaveRows("creature_template_spell", sniffId, CreatureTemplateSpellColumns, rows);
         }
 
-        private const string CreatureQuestItemColumns = "entry, idx, item_id";
-
-        public static int SaveCreatureQuestItems(ulong sniffId, IReadOnlyList<CreatureQuestItemRecord> items)
-        {
-            var rows = new List<object[]>(items.Count);
-            foreach (var i in items)
-                rows.Add(new object[] { i.Entry, i.Index, i.ItemId });
-
-            return SaveRows("creature_quest_item", sniffId, CreatureQuestItemColumns, rows);
-        }
-
         private const string CreatureGossipColumns = "entry, menu_id";
 
         public static int SaveCreatureGossips(ulong sniffId, IReadOnlyList<CreatureGossipRecord> gossips)
@@ -1204,24 +1133,6 @@ CREATE TABLE IF NOT EXISTS `areatrigger_teleport` (
                 rows.Add(new object[] { g.Entry, g.MenuId });
 
             return SaveRows("creature_gossip", sniffId, CreatureGossipColumns, rows);
-        }
-
-        private const string CreatureValueColumns =
-            "entry, map, field, value, guids, on_create_guids, changed_guids, observations";
-
-        public static int SaveCreatureValues(ulong sniffId, IReadOnlyList<CreatureValueRecord> values)
-        {
-            var rows = new List<object[]>(values.Count);
-            foreach (var v in values)
-            {
-                rows.Add(new object[]
-                {
-                    v.Entry, v.Map, v.Field, v.Value, v.Guids, v.OnCreateGuids,
-                    v.ChangedGuids, v.Observations
-                });
-            }
-
-            return SaveRows("creature_value", sniffId, CreatureValueColumns, rows, 1000);
         }
 
         private const string CreatureTemplateColumns =
@@ -1269,38 +1180,6 @@ CREATE TABLE IF NOT EXISTS `areatrigger_teleport` (
                 rows.Add(new object[] { a.Guid, a.Entry, a.Map, a.AggroUtc });
 
             return SaveRows("creature_aggro", sniffId, CreatureAggroColumns, rows, 1000);
-        }
-
-        private const string CreatureEquipColumns = "guid, entry, map, item_id1, item_id2, item_id3";
-
-        public static int SaveCreatureEquipment(ulong sniffId, IReadOnlyList<CreatureEquipRecord> equip)
-        {
-            var rows = new List<object[]>(equip.Count);
-            foreach (var e in equip)
-                rows.Add(new object[] { e.Guid, e.Entry, e.Map, e.ItemId1, e.ItemId2, e.ItemId3 });
-
-            return SaveRows("creature_equip", sniffId, CreatureEquipColumns, rows);
-        }
-
-        private const string CreatureAuraColumns =
-            "guid, entry, map, spell_id, self_cast, on_create, observations, max_duration_ms";
-        // self_cast is the Caster byte, not a bool: 2 means the packet carried no caster
-        // information at all, which is not the same claim as "the creature cast it".
-
-
-        public static int SaveCreatureAuras(ulong sniffId, IReadOnlyList<CreatureAuraRecord> auras)
-        {
-            var rows = new List<object[]>(auras.Count);
-            foreach (var a in auras)
-            {
-                rows.Add(new object[]
-                {
-                    a.Guid, a.Entry, a.Map, a.SpellId, a.Caster, a.OnCreate ? 1 : 0,
-                    a.Observations, a.DurationMs
-                });
-            }
-
-            return SaveRows("creature_aura", sniffId, CreatureAuraColumns, rows, 1000);
         }
 
         private const string GossipMenuColumns = "menu_id, text_id, creature_entry, observations";
