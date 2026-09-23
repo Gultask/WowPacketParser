@@ -200,6 +200,9 @@ message GossipMessageOption {
   bool boxCoded = 4;
   uint32 boxCost = 5;
   string boxText = 6;
+  // The option's own id, as the client sends it back in CMSG_GOSSIP_SELECT_OPTION.
+  // Only the builds that carry it set this; older ones leave it 0 and key on optionIndex.
+  int32 gossipOptionID = 7;
 }
 
 message GossipQuestOption {

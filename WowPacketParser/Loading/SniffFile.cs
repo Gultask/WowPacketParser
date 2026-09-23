@@ -1253,14 +1253,22 @@ namespace WowPacketParser.Loading
                 {
                     foreach (var hit in go.HitTargets)
                     {
-                        if (hit == null || hit.Entry == 0)
+                        if (hit == null)
                             continue;
-                        if (hit.Type != UniversalHighGuid.Creature && hit.Type != UniversalHighGuid.Vehicle &&
-                            hit.Type != UniversalHighGuid.GameObject)
+
+                        // A player carries no entry, so all players share target_entry 0 and
+                        // target_type tells them apart. They are what says an entry condition also
+                        // admits players: a Keg Trap that stuns the sniffer as well as the patrons.
+                        var isPlayer = hit.Type == UniversalHighGuid.Player;
+                        if (!isPlayer && hit.Entry == 0)
+                            continue;
+                        if (!isPlayer && hit.Type != UniversalHighGuid.Creature &&
+                            hit.Type != UniversalHighGuid.Vehicle && hit.Type != UniversalHighGuid.GameObject)
                             continue;
 
                         var casterEntry = data.Caster.Entry;
-                        var tkey = (data.Spell, casterEntry, hit.Entry);
+                        var targetEntry = isPlayer ? 0u : hit.Entry;
+                        var tkey = (data.Spell, casterEntry, targetEntry);
                         if (!targetHits.TryGetValue(tkey, out var row))
                         {
                             targetHits[tkey] = row = new SpellTargetRecord
@@ -1269,12 +1277,16 @@ namespace WowPacketParser.Loading
                                 SpellId = data.Spell,
                                 CasterEntry = casterEntry,
                                 CasterType = data.Caster.Type.ToString(),
-                                TargetEntry = hit.Entry,
+                                TargetEntry = targetEntry,
                                 TargetType = hit.Type.ToString()
                             };
                         }
 
                         row.Hits++;
+                        // A player casting on itself, or a creature on itself rather than on another
+                        // of its entry, comes from a caster effect, not from the entry target.
+                        if (casterKey != null && GuidKey(hit) == casterKey)
+                            row.SelfHits++;
                     }
                 }
 
@@ -2246,6 +2258,7 @@ namespace WowPacketParser.Loading
                             SniffId = sniffId,
                             MenuId = gossip.MenuId,
                             OptionIndex = option.OptionIndex,
+                            GossipOptionId = option.GossipOptionID,
                             OptionIcon = option.OptionNpc,
                             OptionText = option.Text,
                             BoxMoney = option.BoxCost,

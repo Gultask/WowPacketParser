@@ -102,6 +102,11 @@ namespace WowPacketParser.SQL
             // CREATE TABLE IF NOT EXISTS leaves a table that already exists alone, so columns added
             // after a database was first built have to be put in by hand. Rows ingested before the
             // column existed keep the default; only a re-ingest fills them in.
+            EnsureColumn("gossip_menu_option", "gossip_option_id",
+                         "INT NOT NULL DEFAULT 0 COMMENT 'the option''s own id; 0 on builds whose client does not send one' AFTER `option_index`");
+            EnsureColumn("spell_target", "self_hits",
+                         "INT NOT NULL DEFAULT 0 COMMENT 'of hits, those that landed on the caster itself' AFTER `hits`");
+
             EnsureColumn("sniff", "file_crc32",
                          "CHAR(8) NULL COMMENT 'CRC-32 as 7-Zip lists it, so an archive can be matched against this table without unpacking it' AFTER `file_size`");
 
@@ -976,11 +981,12 @@ CREATE TABLE IF NOT EXISTS `spell_target` (
   `target_entry` INT UNSIGNED    NOT NULL,
   `target_type`  VARCHAR(16)     NULL,
   `hits`         INT             NOT NULL,
+  `self_hits`    INT             NOT NULL DEFAULT 0 COMMENT 'of hits, those that landed on the caster itself',
   PRIMARY KEY (`sniff_id`, `spell_id`, `caster_entry`, `target_entry`),
   KEY `ix_starget_spell` (`spell_id`, `target_entry`),
   CONSTRAINT `fk_starget_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-  COMMENT='Which entries a spell actually landed on. The empirical answer to what an entry-targeted spell points at: Spell.dbc names no entry for TARGET_UNIT_NEARBY_ENTRY because the entry lives in the server tables, but SMSG_SPELL_GO lists what was hit.';";
+  COMMENT='Which entries a spell actually landed on. The empirical answer to what an entry-targeted spell points at: Spell.dbc names no entry for TARGET_UNIT_NEARBY_ENTRY because the entry lives in the server tables, but SMSG_SPELL_GO lists what was hit. Players have no entry: target_entry 0 with target_type Player.';";
 
         private const string SpellDestinationTableDdl = @"
 CREATE TABLE IF NOT EXISTS `spell_destination` (
@@ -1049,6 +1055,7 @@ CREATE TABLE IF NOT EXISTS `gossip_menu_option` (
   `sniff_id`     BIGINT UNSIGNED NOT NULL,
   `menu_id`      INT UNSIGNED    NOT NULL,
   `option_index` INT UNSIGNED    NOT NULL,
+  `gossip_option_id` INT         NOT NULL DEFAULT 0 COMMENT 'the option''s own id; 0 on builds whose client does not send one',
   `option_icon`  INT             NOT NULL,
   `option_text`  TEXT            NULL,
   `box_money`    INT UNSIGNED    NOT NULL,
@@ -1110,13 +1117,18 @@ CREATE TABLE IF NOT EXISTS `areatrigger_teleport` (
         }
 
         private const string SpellTargetColumns =
-            "spell_id, caster_entry, caster_type, target_entry, target_type, hits";
+            "spell_id, caster_entry, caster_type, target_entry, target_type, hits, self_hits";
 
         public static int SaveSpellTargets(ulong sniffId, IReadOnlyList<SpellTargetRecord> targets)
         {
             var rows = new List<object[]>(targets.Count);
             foreach (var t in targets)
-                rows.Add(new object[] { t.SpellId, t.CasterEntry, t.CasterType, t.TargetEntry, t.TargetType, t.Hits });
+            {
+                rows.Add(new object[]
+                {
+                    t.SpellId, t.CasterEntry, t.CasterType, t.TargetEntry, t.TargetType, t.Hits, t.SelfHits
+                });
+            }
 
             return SaveRows("spell_target", sniffId, SpellTargetColumns, rows, 1000);
         }
@@ -1303,7 +1315,7 @@ CREATE TABLE IF NOT EXISTS `areatrigger_teleport` (
         }
 
         private const string GossipMenuOptionColumns =
-            "menu_id, option_index, option_icon, option_text, box_money, box_coded, box_text";
+            "menu_id, option_index, gossip_option_id, option_icon, option_text, box_money, box_coded, box_text";
 
         public static int SaveGossipMenuOptions(ulong sniffId, IReadOnlyList<GossipMenuOptionRecord> options)
         {
@@ -1312,7 +1324,7 @@ CREATE TABLE IF NOT EXISTS `areatrigger_teleport` (
             {
                 rows.Add(new object[]
                 {
-                    o.MenuId, o.OptionIndex, o.OptionIcon, o.OptionText, o.BoxMoney,
+                    o.MenuId, o.OptionIndex, o.GossipOptionId, o.OptionIcon, o.OptionText, o.BoxMoney,
                     o.BoxCoded ? 1 : 0, o.BoxText
                 });
             }

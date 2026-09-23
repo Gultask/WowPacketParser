@@ -24,7 +24,7 @@ the only tables that cannot be rebuilt without re-reading the sniffs, which take
 | `creature_movement` | sniff × creature | movement reduced to a centre and a radius |
 | `loot_instance` / `loot_instance_item` | loot opened | empty loots kept on purpose: they are the denominator |
 | `creature_spell_cast` | SMSG_SPELL_START | raw; the gap between two is the cooldown observation |
-| `spell_target` | sniff × spell × target entry | what an entry-targeted spell actually hit |
+| `spell_target` | sniff × spell × target entry | what an entry-targeted spell actually hit; players are entry 0, `self_hits` counts hits on the caster |
 | `spell_destination` | sniff × spell × point | where a ground-targeted spell was aimed |
 | `creature_equip` | sniff × creature | the three virtual item slots |
 | `creature_aura` | sniff × creature × spell | mostly the player's own debuffs; `entry-auras.sql` sorts them |

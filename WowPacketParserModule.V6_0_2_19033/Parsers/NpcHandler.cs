@@ -38,7 +38,7 @@ namespace WowPacketParserModule.V6_0_2_19033.Parsers
             if (ClientVersion.RemovedInVersion(ClientVersionBuild.V10_0_0_46181))
                 gossipOption.OptionID = gossipMessageOption.OptionIndex = (uint)packet.ReadInt32("OptionID", idx);
             else
-                gossipOption.GossipOptionID = packet.ReadInt32("GossipOptionID", idx);
+                gossipOption.GossipOptionID = gossipMessageOption.GossipOptionID = packet.ReadInt32("GossipOptionID", idx);
 
             gossipOption.OptionNpc = ClientVersion.AddedInVersion(ClientVersionBuild.V11_2_5_63506)
                 ? packet.ReadUInt32E<GossipOptionNpc>("OptionNPC", idx)

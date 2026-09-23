@@ -81,11 +81,11 @@
         public const int LootVersion = 1;
         public const int CreatureMovementVersion = 1;
         public const int CreatureSpellVersion = 1;
-        public const int SpellTargetVersion = 1;
+        public const int SpellTargetVersion = 2;   // 2 added player hits and self_hits
         public const int SpellDestinationVersion = 1;
         public const int CreatureEquipVersion = 1;
         public const int CreatureAuraVersion = 2; // self_cast tells unknown from self
-        public const int GossipVersion = 1;
+        public const int GossipVersion = 2; // 2 added the option's own id next to the order index
         public const int AreaTriggerTeleportVersion = 1;
         public const int NpcVendorVersion = 1;
         public const int NpcSpellClickVersion = 1;

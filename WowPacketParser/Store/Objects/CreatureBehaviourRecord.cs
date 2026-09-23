@@ -48,6 +48,7 @@ namespace WowPacketParser.Store.Objects
         public uint TargetEntry;
         public string TargetType;
         public int Hits;
+        public int SelfHits;
     }
 
     /// <summary>
@@ -122,6 +123,9 @@ namespace WowPacketParser.Store.Objects
         public ulong SniffId;
         public uint MenuId;
         public uint OptionIndex;
+
+        /// <summary>The option's own id. 0 on builds before the client started sending one.</summary>
+        public int GossipOptionId;
         public int OptionIcon;
         public string OptionText;
         public uint BoxMoney;
