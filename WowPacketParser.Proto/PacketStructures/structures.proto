@@ -82,6 +82,7 @@ message PacketHolder {
       PacketAIReaction aiReaction = 46;
       PacketInitWorldStates initWorldStates = 47;
       PacketUpdateWorldState updateWorldState = 48;
+      PacketAttackerStateUpdate attackerStateUpdate = 49;
   }
 }
 
@@ -305,6 +306,8 @@ message PacketAuraUpdateEntry {
 message PacketAuraUpdate {
   UniversalGuid unit = 1;
   repeated PacketAuraUpdateEntry updates = 2;
+  // The list replaces every aura the unit had; slots it does not name are gone.
+  bool updateAll = 3;
 }
 
 message PacketAuraUpdateAll {
@@ -920,4 +923,29 @@ message PacketUpdateWorldState {
 message WorldState {
   int32 id = 1;
   int32 value = 2;
+}
+
+// One melee swing, from SMSG_ATTACKER_STATE_UPDATE.
+message PacketAttackerStateUpdate {
+  UniversalGuid attacker = 1;
+  UniversalGuid victim = 2;
+  uint32 hitInfo = 3;
+  int32 damage = 4;
+  // Before armor and block: damage + absorbed + resisted + blocked + what armor took.
+  int32 originalDamage = 5;
+  int32 overDamage = 6;
+  repeated AttackSubDamage subDamages = 7;
+  uint32 victimState = 8;
+  int32 meleeSpellId = 9;
+  int32 blockAmount = 10;
+  // Only when HITINFO_UNK0 carries the server's debug block.
+  google.protobuf.Int32Value debugArmorReduction = 11;
+}
+
+message AttackSubDamage {
+  uint32 schoolMask = 1;
+  float floatDamage = 2;
+  int32 intDamage = 3;
+  int32 absorbed = 4;
+  int32 resisted = 5;
 }

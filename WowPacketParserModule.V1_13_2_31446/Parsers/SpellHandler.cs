@@ -186,7 +186,7 @@ namespace WowPacketParserModule.V1_13_2_31446.Parsers
         public static void HandleAuraUpdate(Packet packet)
         {
             PacketAuraUpdate packetAuraUpdate = packet.Holder.AuraUpdate = new();
-            packet.ReadBit("UpdateAll");
+            packetAuraUpdate.UpdateAll = packet.ReadBit("UpdateAll");
             int countBits = ClientVersion.AddedInVersion(ClientVersionBuild.V1_13_3_32790) ? 8 : 7;
             var count = packet.ReadBits("AurasCount", countBits);
 

@@ -1,6 +1,7 @@
 using WowPacketParser.Enums;
 using WowPacketParser.Misc;
 using WowPacketParser.Parsing;
+using WowPacketParser.Proto;
 
 namespace WowPacketParserModule.V3_4_0_45166.Parsers
 {
@@ -56,45 +57,71 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
             packet.ReadSingle("CrushChance", idx);
         }
 
-        public static void ReadAttackRoundInfo(Packet packet, params object[] indexes)
+        /// <param name="round">Filled when the caller is the swing itself; null for logs that repeat one.</param>
+        public static void ReadAttackRoundInfo(Packet packet, PacketAttackerStateUpdate round, params object[] indexes)
         {
             var hitInfo = packet.ReadInt32E<SpellHitInfo>("HitInfo", indexes);
 
-            packet.ReadPackedGuid128("AttackerGUID", indexes);
-            packet.ReadPackedGuid128("TargetGUID", indexes);
+            var attacker = packet.ReadPackedGuid128("AttackerGUID", indexes);
+            var victim = packet.ReadPackedGuid128("TargetGUID", indexes);
 
-            packet.ReadInt32("Damage", indexes);
-            packet.ReadInt32("OriginalDamage", indexes);
-            packet.ReadInt32("OverDamage", indexes);
+            var damage = packet.ReadInt32("Damage", indexes);
+            var originalDamage = packet.ReadInt32("OriginalDamage", indexes);
+            var overDamage = packet.ReadInt32("OverDamage", indexes);
+
+            if (round != null)
+            {
+                round.HitInfo = (uint)hitInfo;
+                round.Attacker = attacker.ToUniversalGuid();
+                round.Victim = victim.ToUniversalGuid();
+                round.Damage = damage;
+                round.OriginalDamage = originalDamage;
+                round.OverDamage = overDamage;
+            }
 
             var subDmgCount = packet.ReadByte("SubDmgCount", indexes);
             for (var i = 0; i < subDmgCount; ++i)
             {
-                packet.ReadInt32("SchoolMask", indexes, i);
-                packet.ReadSingle("FloatDamage", indexes, i);
-                packet.ReadInt32("IntDamage", indexes, i);
+                var sub = new AttackSubDamage();
+                sub.SchoolMask = (uint)packet.ReadInt32("SchoolMask", indexes, i);
+                sub.FloatDamage = packet.ReadSingle("FloatDamage", indexes, i);
+                sub.IntDamage = packet.ReadInt32("IntDamage", indexes, i);
 
                 if (hitInfo.HasAnyFlag(SpellHitInfo.HITINFO_PARTIAL_ABSORB | SpellHitInfo.HITINFO_FULL_ABSORB))
-                    packet.ReadInt32("DamageAbsorbed", indexes, i);
+                    sub.Absorbed = packet.ReadInt32("DamageAbsorbed", indexes, i);
 
                 if (hitInfo.HasAnyFlag(SpellHitInfo.HITINFO_PARTIAL_RESIST | SpellHitInfo.HITINFO_FULL_RESIST))
-                    packet.ReadInt32("DamageResisted", indexes, i);
+                    sub.Resisted = packet.ReadInt32("DamageResisted", indexes, i);
+
+                round?.SubDamages.Add(sub);
             }
 
-            packet.ReadByteE<VictimStates>("VictimState", indexes);
+            var victimState = packet.ReadByteE<VictimStates>("VictimState", indexes);
             packet.ReadInt32("AttackerState", indexes);
 
-            packet.ReadInt32<SpellId>("MeleeSpellID", indexes);
+            var meleeSpell = packet.ReadInt32<SpellId>("MeleeSpellID", indexes);
+
+            if (round != null)
+            {
+                round.VictimState = (uint)victimState;
+                round.MeleeSpellId = meleeSpell;
+            }
 
             if (hitInfo.HasAnyFlag(SpellHitInfo.HITINFO_BLOCK))
-                packet.ReadInt32("BlockAmount", indexes);
+            {
+                var block = packet.ReadInt32("BlockAmount", indexes);
+                if (round != null)
+                    round.BlockAmount = block;
+            }
 
             if (hitInfo.HasAnyFlag(SpellHitInfo.HITINFO_RAGE_GAIN))
                 packet.ReadInt32("RageGained", indexes);
 
             if (hitInfo.HasAnyFlag(SpellHitInfo.HITINFO_UNK0))
             {
-                packet.ReadInt32("ArmorReduction", indexes);
+                var armorReduction = packet.ReadInt32("ArmorReduction", indexes);
+                if (round != null)
+                    round.DebugArmorReduction = armorReduction;
                 packet.ReadSingle("CritRollNeeded", indexes);
                 packet.ReadSingle("CombatRoll", indexes);
                 packet.ReadSingle("MissChance", indexes);
@@ -206,7 +233,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
 
             packet.ReadInt32("Size");
 
-            ReadAttackRoundInfo(packet, "AttackRoundInfo");
+            ReadAttackRoundInfo(packet, packet.Holder.AttackerStateUpdate = new(), "AttackRoundInfo");
         }
 
         [Parser(Opcode.SMSG_SPELL_PERIODIC_AURA_LOG, ClientBranch.WotLK, ClientVersionBuild.V3_4_3_51505)]
@@ -504,7 +531,7 @@ namespace WowPacketParserModule.V3_4_0_45166.Parsers
 
             packet.ReadInt32("Size");
 
-            ReadAttackRoundInfo(packet, "AttackRoundInfo");
+            ReadAttackRoundInfo(packet, null, "AttackRoundInfo");
         }
     }
 }

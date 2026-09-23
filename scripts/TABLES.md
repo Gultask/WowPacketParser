@@ -38,6 +38,8 @@ the only tables that cannot be rebuilt without re-reading the sniffs, which take
 | `creature_template` | sniff × entry | the static half, stated by the query response |
 | `creature_template_model` | sniff × entry × index | display ids, variable in number |
 | `creature_aggro` | hostile AI reaction | one row per pull, not per creature |
+| `creature_melee` | sniff × entry × swing state | every landed `OriginalDamage` as a JSON array; auras in the key |
+| `creature_armor` | sniff × victim entry × state | clean-hit damage sums; the ratio is armor reduction |
 
 ### These belong to the entry, but they are recorded per guid
 
@@ -322,6 +324,31 @@ build has no `SMSG_LOOT_RESPONSE` and a sniff that produced no loot because the 
 nothing both look like zero rows afterwards. The difference is only knowable at parse time, so
 it is recorded then: `status` is `ok`, `empty` or `unsupported`, and `collector_version` makes
 the sniffs that predate a collector improvement selectable as a re-parse work list.
+
+### Damage and armor both come out of `OriginalDamage`
+
+`SMSG_ATTACKER_STATE_UPDATE` carries the swing twice: `OriginalDamage` before the victim's
+armor, block, absorb and resist, and `Damage` after. So a creature's own damage range reads
+straight off its hits on anything, and on a hit with none of the other mitigations the ratio of
+the two is the victim's armor reduction.
+
+`scripts/melee-multiplier.py` divides each hit by AzerothCore's formula at `DamageModifier` 1
+(`damage_base` + AP/14, times attack time) and reads the multiplier off both ends of the range.
+**Normal mobs land at 1.00 to within 3%, so `creature_classlevelstats` already is the 1.** Where
+the top and bottom ends disagree, something the aura filter missed is in the sample (`mixed`).
+
+The attacker's auras are in `creature_melee`'s key because Enrage, Frenzy and Demoralizing Roar
+are on for part of a fight: before they were, a third of the well-sampled entries read as a
+mixture. The script keeps only states with no aura of a damage or haste type in 3.3.5 Spell.dbc.
+`owner` marks player summons, whose damage follows their owner's stats; the script drops them.
+
+`scripts/creature-armor.py` inverts the 3.3.5 armor formula. It checks out on the player's own
+armor, which is sent: 72% of rows within 1%. Creature attackers measure creature armor with no
+armor penetration in the way; a player's reading can only be low. Treat armor as indicative -
+the inversion multiplies a 0.005 error in the reduction into about 2% of armor.
+
+Both are keyed by entry with a surrogate `id`, not by guid: the natural key ran through a
+512-character aura list that InnoDB copied into every index, at 500 to 850 bytes a row.
 
 ## 2. Script-derived — rebuildable, and dropped by their own script
 

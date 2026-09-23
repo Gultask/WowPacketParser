@@ -118,22 +118,26 @@ namespace WowPacketParserModule.V2_5_1_38707.Parsers
         [Parser(Opcode.SMSG_AURA_UPDATE)]
         public static void HandleAuraUpdate(Packet packet)
         {
-            packet.ReadBit("UpdateAll");
+            PacketAuraUpdate packetAuraUpdate = packet.Holder.AuraUpdate = new();
+            packetAuraUpdate.UpdateAll = packet.ReadBit("UpdateAll");
             var count = packet.ReadBits("AurasCount", 9);
 
             var auras = new List<Aura>();
             for (var i = 0; i < count; ++i)
             {
                 var aura = new Aura();
+                var auraEntry = new PacketAuraUpdateEntry();
+                packetAuraUpdate.Updates.Add(auraEntry);
 
-                aura.Slot = packet.ReadByte("Slot", i);
+                auraEntry.Slot = (int)(aura.Slot = packet.ReadByte("Slot", i));
 
                 packet.ResetBitReader();
                 var hasAura = packet.ReadBit("HasAura", i);
+                auraEntry.Remove = !hasAura;
                 if (hasAura)
                 {
                     packet.ReadPackedGuid128("CastID", i);
-                    aura.SpellId = (uint)packet.ReadInt32<SpellId>("SpellID", i);
+                    aura.SpellId = auraEntry.Spell = (uint)packet.ReadInt32<SpellId>("SpellID", i);
                     packet.ReadInt32("SpellXSpellVisualID", i);
                     aura.AuraFlags = packet.ReadUInt16E<AuraFlagMoP>("Flags", i);
                     packet.ReadUInt32("ActiveFlags", i);
@@ -158,7 +162,7 @@ namespace WowPacketParserModule.V2_5_1_38707.Parsers
                         WowPacketParserModule.V9_0_1_36216.Parsers.CombatLogHandler.ReadContentTuningParams(packet, i, "ContentTuning");
 
                     if (hasCastUnit)
-                        aura.CasterGuid = packet.ReadPackedGuid128("CastUnit", i);
+                        auraEntry.CasterUnit = aura.CasterGuid = packet.ReadPackedGuid128("CastUnit", i);
 
                     aura.Duration = hasDuration ? packet.ReadInt32("Duration", i) : 0;
                     aura.MaxDuration = hasRemaining ? packet.ReadInt32("Remaining", i) : 0;
@@ -178,6 +182,7 @@ namespace WowPacketParserModule.V2_5_1_38707.Parsers
             }
 
             var guid = packet.ReadPackedGuid128("UnitGUID");
+            packetAuraUpdate.Unit = guid;
             if (Storage.Objects.ContainsKey(guid))
             {
                 var unit = Storage.Objects[guid].Item1 as Unit;

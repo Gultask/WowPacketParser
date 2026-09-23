@@ -111,12 +111,15 @@ namespace WowPacketParser.Proto.Processing
                     return Process(packet.BaseData, packet.InitWorldStates);
                 case PacketHolder.KindOneofCase.UpdateWorldState:
                     return Process(packet.BaseData, packet.UpdateWorldState);
+                case PacketHolder.KindOneofCase.AttackerStateUpdate:
+                    return Process(packet.BaseData, packet.AttackerStateUpdate);
                 default:
                     throw new ArgumentOutOfRangeException();
             }
         }
 
         protected virtual T? Process(PacketBase basePacket, PacketQueryGameObjectResponse packet) => default;
+        protected virtual T? Process(PacketBase basePacket, PacketAttackerStateUpdate packet) => default;
         protected virtual T? Process(PacketBase basePacket, PacketClientAreaTrigger packet) => default;
         protected virtual T? Process(PacketBase basePacket, PacketPhaseShift packet) => default;
         protected virtual T? Process(PacketBase basePacket, PacketAuraUpdate packet) => default;

@@ -546,7 +546,7 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
         public static void HandleAuraUpdate(Packet packet)
         {
             PacketAuraUpdate packetAuraUpdate = packet.Holder.AuraUpdate = new();
-            packet.ReadBit("UpdateAll");
+            packetAuraUpdate.UpdateAll = packet.ReadBit("UpdateAll");
             var count = packet.ReadBits("AurasCount", 9);
 
             var auras = new List<Aura>();
@@ -642,7 +642,7 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
         public static void HandleAuraUpdateClassic(Packet packet)
         {
             PacketAuraUpdate packetAuraUpdate = packet.Holder.AuraUpdate = new();
-            packet.ReadBit("UpdateAll");
+            packetAuraUpdate.UpdateAll = packet.ReadBit("UpdateAll");
             var count = packet.ReadBits("AurasCount", 9);
 
             var auras = new List<Aura>();

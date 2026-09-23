@@ -18,7 +18,7 @@ namespace WowPacketParser.SQL
     /// Statements are parameterised rather than built as text: file names reach this code
     /// unescaped, and nothing here is ever meant to become a .sql file.
     /// </summary>
-    public static class IngestDatabase
+    public static partial class IngestDatabase
     {
         private static MySqlConnection _conn;
         private static bool _schemaChecked;
@@ -89,7 +89,8 @@ namespace WowPacketParser.SQL
                                         CreatureTemplateSpellTableDdl, CreatureQuestItemTableDdl,
                                         CreatureGossipTableDdl, CreatureValueTableDdl,
                                         CreatureAggroTableDdl, CreatureTemplateTableDdl,
-                                        CreatureTemplateModelTableDdl })
+                                        CreatureTemplateModelTableDdl, CreatureMeleeTableDdl,
+                                        CreatureArmorTableDdl })
             {
                 using (var cmd = _conn.CreateCommand())
                 {

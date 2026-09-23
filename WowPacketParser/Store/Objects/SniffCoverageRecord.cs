@@ -68,6 +68,8 @@
         public const string CreatureGossip = "creature_gossip";
         public const string CreatureValue = "creature_value";
         public const string CreatureAggro = "creature_aggro";
+        public const string CreatureMelee = "creature_melee";
+        public const string CreatureArmor = "creature_armor";
         public const string CreatureTemplate = "creature_template";
         public const string CreatureTemplateModel = "creature_template_model";
 
@@ -90,6 +92,8 @@
         public const int CreatureGossipVersion = 1;
         public const int CreatureValueVersion = 1;
         public const int CreatureAggroVersion = 1;
+        public const int CreatureMeleeVersion = 1;
+        public const int CreatureArmorVersion = 1;
         public const int CreatureTemplateVersion = 1;
         public const int CreatureTemplateModelVersion = 1;
 

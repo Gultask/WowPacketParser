@@ -22,7 +22,7 @@ using WowPacketParser.Store.Objects;
 
 namespace WowPacketParser.Loading
 {
-    public class SniffFile
+    public partial class SniffFile
     {
         private string _fileName;
         private string _tempName;
@@ -326,7 +326,16 @@ namespace WowPacketParser.Loading
                             packet.ClosePacket();
 
                             if (_dumpFormat == DumpFormatType.Database && packet.Holder.UpdateObject != null)
+                            {
                                 FoldCreatureValues(packet.Holder.UpdateObject);
+                                TrackUnitStates(packet.Holder.UpdateObject);
+                            }
+
+                            if (_dumpFormat == DumpFormatType.Database && packet.Holder.AuraUpdate != null)
+                                TrackAuras(packet.Holder.AuraUpdate);
+
+                            if (_dumpFormat == DumpFormatType.Database && packet.Holder.AttackerStateUpdate != null)
+                                FoldMelee(packet.Holder);
 
                             if (_dumpFormat.IsUniversalProtobufType() || movementEnabled || HotfixSettings.Instance.ShouldLog())
                             {
@@ -836,6 +845,18 @@ namespace WowPacketParser.Loading
                     Trace.WriteLine($"{_logPrefix}: {aggroWritten} creature pulls recorded");
                 coverage.Add(Coverage(CollectorVersion.CreatureAggro, CollectorVersion.CreatureAggroVersion,
                                       aggroWritten, Opcode.SMSG_AI_REACTION));
+
+                var melee = CollectCreatureMelee(sniffId);
+                var meleeWritten = IngestDatabase.SaveCreatureMelee(sniffId, melee);
+                var armor = CollectCreatureArmor(sniffId);
+                var armorWritten = IngestDatabase.SaveCreatureArmor(sniffId, armor);
+                if (melee.Count > 0)
+                    Trace.WriteLine($"{_logPrefix}: {melee.Sum(m => m.Swings)} creature swings in {meleeWritten} rows, " +
+                                    $"{armor.Sum(a => a.Swings)} clean hits in {armorWritten} armor rows recorded");
+                coverage.Add(Coverage(CollectorVersion.CreatureMelee, CollectorVersion.CreatureMeleeVersion,
+                                      meleeWritten, Opcode.SMSG_ATTACKER_STATE_UPDATE));
+                coverage.Add(Coverage(CollectorVersion.CreatureArmor, CollectorVersion.CreatureArmorVersion,
+                                      armorWritten, Opcode.SMSG_ATTACKER_STATE_UPDATE));
 
                 var teleports = CollectAreaTriggerTeleports(sniffId, packets);
                 var teleWritten = IngestDatabase.SaveAreaTriggerTeleports(sniffId, teleports);

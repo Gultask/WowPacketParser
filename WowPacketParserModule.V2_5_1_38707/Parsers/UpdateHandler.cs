@@ -210,11 +210,11 @@ namespace WowPacketParserModule.V2_5_1_38707.Parsers
                             break;
                         }
                         case ObjectType.Player:
-                            handler.ReadCreateUnitData(fieldsData, flags, index);
+                            createObject.Values.Fields.UpdateData(handler.ReadCreateUnitData(fieldsData, flags, index));
                             handler.ReadCreatePlayerData(fieldsData, flags, index);
                             break;
                         case ObjectType.ActivePlayer:
-                            handler.ReadCreateUnitData(fieldsData, flags, index);
+                            createObject.Values.Fields.UpdateData(handler.ReadCreateUnitData(fieldsData, flags, index));
                             handler.ReadCreatePlayerData(fieldsData, flags, index);
                             handler.ReadCreateActivePlayerData(fieldsData, flags, index);
                             break;
