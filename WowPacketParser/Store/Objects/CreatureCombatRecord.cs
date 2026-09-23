@@ -77,4 +77,52 @@ namespace WowPacketParser.Store.Objects
         public long AmountSum;
         public long OriginalSum;
     }
+
+    /// <summary>
+    /// One stat sheet an entry was sent with, and how many sheet updates said exactly that.
+    /// </summary>
+    public sealed class CreatureStatsRecord
+    {
+        public ulong SniffId;
+        public uint Entry;
+        public string UnitType;
+        public string Relation;
+        public uint Map;
+        public uint Level;
+        public uint Class;
+        public string Auras;
+        public long MaxHealth;
+        public int? BaseHealth;
+        public int? BaseMana;
+        public float? MinDamage;
+        public float? MaxDamage;
+        public float? MinOffHandDamage;
+        public float? MaxOffHandDamage;
+        public float? MinRangedDamage;
+        public float? MaxRangedDamage;
+        public int? AttackPower;
+        public int? AttackPowerModPos;
+        public int? AttackPowerModNeg;
+        public float? AttackPowerMultiplier;
+        public int? RangedAttackPower;
+        public uint AttackTime;
+        public uint OffHandAttackTime;
+        public uint RangedAttackTime;
+        public int? Armor;
+        public string Stats;
+        public string StatPosBuff;
+        public string StatNegBuff;
+        public string Resistances;
+        public string ResistancePos;
+        public string ResistanceNeg;
+
+        public readonly HashSet<string> Guids = new();
+        public int Updates;
+
+        public string Key() => string.Join("|", Entry, UnitType, Relation, Map, Level, Class, Auras, MaxHealth, BaseHealth,
+            BaseMana, MinDamage, MaxDamage, MinOffHandDamage, MaxOffHandDamage, MinRangedDamage, MaxRangedDamage,
+            AttackPower, AttackPowerModPos, AttackPowerModNeg, AttackPowerMultiplier, RangedAttackPower, AttackTime,
+            OffHandAttackTime, RangedAttackTime, Stats, StatPosBuff, StatNegBuff, Resistances, ResistancePos,
+            ResistanceNeg);
+    }
 }

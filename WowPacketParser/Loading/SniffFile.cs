@@ -871,6 +871,14 @@ namespace WowPacketParser.Loading
                 coverage.Add(Coverage(CollectorVersion.CreatureXp, CollectorVersion.CreatureXpVersion,
                                       xpWritten, Opcode.SMSG_LOG_XP_GAIN));
 
+                var stats = CollectCreatureStats(sniffId);
+                var statsWritten = IngestDatabase.SaveCreatureStats(sniffId, stats);
+                if (stats.Count > 0)
+                    Trace.WriteLine($"{_logPrefix}: {stats.Sum(x => x.Updates)} stat sheets of {stats.Select(x => x.Entry).Distinct().Count()} " +
+                                    $"owned entries in {statsWritten} rows recorded");
+                coverage.Add(Coverage(CollectorVersion.CreatureStats, CollectorVersion.CreatureStatsVersion,
+                                      statsWritten, Opcode.SMSG_UPDATE_OBJECT));
+
                 var teleports = CollectAreaTriggerTeleports(sniffId, packets);
                 var teleWritten = IngestDatabase.SaveAreaTriggerTeleports(sniffId, teleports);
                 if (teleports.Count > 0)

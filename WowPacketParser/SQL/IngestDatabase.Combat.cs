@@ -136,5 +136,70 @@ CREATE TABLE IF NOT EXISTS `creature_xp` (
 
             return SaveRows("creature_xp", sniffId, CreatureXpColumns, rows, 1000);
         }
+
+        private const string CreatureStatsTableDdl = @"
+CREATE TABLE IF NOT EXISTS `creature_stats` (
+  `id`                  BIGINT UNSIGNED   NOT NULL AUTO_INCREMENT,
+  `sniff_id`            BIGINT UNSIGNED   NOT NULL,
+  `entry`               INT UNSIGNED      NOT NULL,
+  `unit_type`           VARCHAR(8)        NOT NULL COMMENT 'creature, vehicle or pet, from the guid',
+  `relation`            VARCHAR(8)        NOT NULL COMMENT 'charmed, summoned, created or demon, as last sent; empty if none was',
+  `map`                 INT UNSIGNED      NOT NULL,
+  `level`               SMALLINT UNSIGNED NOT NULL,
+  `class`               TINYINT UNSIGNED  NOT NULL COMMENT 'unit class as sent; 0 if never seen',
+  `auras`               VARCHAR(512)      NOT NULL COMMENT 'spell ids on the unit when the sheet was sent, as in creature_melee',
+  `max_health`          BIGINT            NOT NULL,
+  `base_health`         INT               NULL,
+  `base_mana`           INT               NULL,
+  `min_damage`          FLOAT             NULL COMMENT 'main hand, as the paperdoll shows it: (damage_base + AP/14) * DamageModifier * attack time',
+  `max_damage`          FLOAT             NULL,
+  `min_offhand_damage`  FLOAT             NULL,
+  `max_offhand_damage`  FLOAT             NULL,
+  `min_ranged_damage`   FLOAT             NULL,
+  `max_ranged_damage`   FLOAT             NULL,
+  `attack_power`        INT               NULL,
+  `attack_power_pos`    INT               NULL,
+  `attack_power_neg`    INT               NULL,
+  `attack_power_mult`   FLOAT             NULL,
+  `ranged_attack_power` INT               NULL,
+  `attack_time`         INT UNSIGNED      NOT NULL COMMENT 'ms; 0 if never seen',
+  `offhand_attack_time` INT UNSIGNED      NOT NULL,
+  `ranged_attack_time`  INT UNSIGNED      NOT NULL,
+  `armor`               INT               NULL,
+  `stats`               VARCHAR(64)       NOT NULL COMMENT 'str,agi,sta,int,spi totals; an empty slot was never sent',
+  `stat_pos`            VARCHAR(64)       NOT NULL COMMENT 'the buffs inside those totals, so the base is stats - stat_pos - stat_neg',
+  `stat_neg`            VARCHAR(64)       NOT NULL,
+  `resistances`         VARCHAR(96)       NOT NULL COMMENT 'armor then holy, fire, nature, frost, shadow, arcane',
+  `resistance_pos`      VARCHAR(96)       NOT NULL,
+  `resistance_neg`      VARCHAR(96)       NOT NULL,
+  `guids`               INT               NOT NULL,
+  `updates`             INT               NOT NULL COMMENT 'sheet updates that said exactly this',
+  PRIMARY KEY (`id`),
+  KEY `ix_cstats_entry` (`entry`, `level`),
+  CONSTRAINT `fk_cstats_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='The stat sheet the server sends a unit''s owner, charmer or rider: pets, guardians, vehicles and mind-controlled mobs. The damage range is the server''s own arithmetic, so it gives DamageModifier exactly; armor and resistances are sent as they are.';";
+
+        private const string CreatureStatsColumns =
+            "entry, unit_type, relation, map, level, class, auras, max_health, base_health, base_mana, min_damage, " +
+            "max_damage, min_offhand_damage, max_offhand_damage, min_ranged_damage, max_ranged_damage, attack_power, " +
+            "attack_power_pos, attack_power_neg, attack_power_mult, ranged_attack_power, attack_time, " +
+            "offhand_attack_time, ranged_attack_time, armor, stats, stat_pos, stat_neg, resistances, resistance_pos, " +
+            "resistance_neg, guids, updates";
+
+        public static int SaveCreatureStats(ulong sniffId, IReadOnlyList<CreatureStatsRecord> stats)
+        {
+            var rows = stats.Select(x => new object[]
+            {
+                x.Entry, x.UnitType, x.Relation, x.Map, x.Level, x.Class, x.Auras, x.MaxHealth, x.BaseHealth,
+                x.BaseMana, x.MinDamage, x.MaxDamage, x.MinOffHandDamage, x.MaxOffHandDamage, x.MinRangedDamage,
+                x.MaxRangedDamage, x.AttackPower, x.AttackPowerModPos, x.AttackPowerModNeg, x.AttackPowerMultiplier,
+                x.RangedAttackPower, x.AttackTime, x.OffHandAttackTime, x.RangedAttackTime, x.Armor, x.Stats,
+                x.StatPosBuff, x.StatNegBuff, x.Resistances, x.ResistancePos, x.ResistanceNeg, x.Guids.Count,
+                x.Updates
+            }).ToList();
+
+            return SaveRows("creature_stats", sniffId, CreatureStatsColumns, rows, 500);
+        }
     }
 }

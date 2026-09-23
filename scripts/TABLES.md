@@ -41,6 +41,7 @@ the only tables that cannot be rebuilt without re-reading the sniffs, which take
 | `creature_melee` | sniff × entry × swing state | every landed `OriginalDamage` as a JSON array; auras in the key |
 | `creature_armor` | sniff × victim entry × state | clean-hit damage sums; the ratio is armor reduction |
 | `creature_xp` | sniff × entry × both levels | kill XP before the rested bonus |
+| `creature_stats` | sniff × entry × stat sheet | the owner-only paperdoll: damage range, attack power, stats, all seven resistances |
 
 ### These belong to the entry, but they are recorded per guid
 
@@ -358,6 +359,28 @@ AC does - 367 of 502 normal mobs against 439 - so it is a hint, not a stand-in.
 
 All three are keyed by entry with a surrogate `id`, not by guid: the natural key ran through a
 512-character aura list that InnoDB copied into every index, at 500 to 850 bytes a row.
+
+### `creature_stats` gives the multiplier without fitting anything
+
+The server sends a unit's stat sheet - `MinDamage`/`MaxDamage`, attack power, the five stats and
+their buffs, armor and the six resistances - only to whoever owns, charms or rides it. For a
+creature that means pets, guardians, quest vehicles and mind-controlled mobs. **TBC Anniversary
+(2.5.5 and 2.5.6) sends it for every creature in sight**; the 1.15.7, 3.4, 4.4.1 and 5.5.0
+samples checked sent it to the owner only.
+
+The range is the server's own arithmetic, so `(max - min) / attack time` is
+`damage_base × DamageModifier / 2` exactly, with no attack power in it. `scripts/creature-stats.py`
+reads the modifier off that, tries each `damage_base` column, and keeps the one whose modifier
+also reproduces `min`. The owned sheets matched AzerothCore's `creature_classlevelstats` (stats,
+armor, attack power, `damage_exp2`) to the digit. Where they differ, Blizzard's modifiers come out
+as round numbers - Gymer 10 against AC's 1, Wyrmrest Vanquisher 4 against 7.5, Theramore Guard 2
+at every level from 53 to 57 - and TBC Anniversary trainers and vendors sit at 0.5. A
+`min_check` of `ap differs` means the creature's attack power is not AC's; the modifier is still
+exact, but the base column is AC's guess. TBC Anniversary armor runs 1-2% above AC's `basearmor`
+across the board, so treat `armor_modifier` near 1.01 as 1.
+
+A create block whose holder lost its `UpdateObject` to a spline (see `creature_waypoint`) leaves
+the sheet's first row partial: empty slots in `stats` were never sent, not zero.
 
 ## 2. Script-derived — rebuildable, and dropped by their own script
 

@@ -23,6 +23,12 @@ namespace WowPacketParser.Loading
             public int Armor = -1;
             public uint AttackTime0;
             public uint AttackTime1;
+            public uint RangedAttackTime;
+            public uint Class;
+            public long MaxHealth;
+            public string Relation = "";
+            public string[] Held;
+            public StatSheet Sheet;
             public readonly Dictionary<int, uint> Auras = new();
             public string AuraKey = "";
 
@@ -88,6 +94,16 @@ namespace WowPacketParser.Loading
                 state.AttackTime0 = unit.AttackRoundBaseTime[0].Value.Value;
             if (unit.AttackRoundBaseTime.Count > 1 && unit.AttackRoundBaseTime[1]?.Value > 0)
                 state.AttackTime1 = unit.AttackRoundBaseTime[1].Value.Value;
+            if (unit.RangedAttackRoundBaseTime > 0)
+                state.RangedAttackTime = unit.RangedAttackRoundBaseTime.Value;
+            if (unit.ClassId != null)
+                state.Class = unit.ClassId.Value;
+            if (unit.MaxHealth != null)
+                state.MaxHealth = unit.MaxHealth.Value;
+            TrackRelation(state, unit);
+
+            if (guid.Type is UniversalHighGuid.Creature or UniversalHighGuid.Vehicle or UniversalHighGuid.Pet)
+                FoldStatSheet(key, guid, state, unit);
         }
 
         private void TrackAuras(PacketAuraUpdate update)
@@ -128,7 +144,7 @@ namespace WowPacketParser.Loading
         private UnitState StateOf(string key, UniversalGuid guid)
         {
             var state = Tracked(key);
-            if (state.Resolved && state.Level != 0 && state.AttackTime0 != 0)
+            if (state.Resolved && state.Level != 0 && state.AttackTime0 != 0 && state.Class != 0)
                 return state;
 
             WowGuid wowGuid = guid.Guid128 != null ? new WowGuid128(guid.Guid128.Low, guid.Guid128.High)
@@ -156,6 +172,8 @@ namespace WowPacketParser.Loading
                 state.AttackTime0 = data.AttackRoundBaseTime[0] ?? 0;
             if (state.AttackTime1 == 0 && data.AttackRoundBaseTime?.Length > 1)
                 state.AttackTime1 = data.AttackRoundBaseTime[1] ?? 0;
+            if (state.Class == 0 && data.ClassId > 0)
+                state.Class = data.ClassId.Value;
 
             return state;
         }

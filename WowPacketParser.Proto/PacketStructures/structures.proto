@@ -611,6 +611,26 @@ message UpdateValuesUnitDataFields {
   google.protobuf.Int32Value baseMana = 57;
   google.protobuf.Int32Value baseHealth = 58;
   optional UniversalGuid charmedBy = 59;
+  // The stat sheet. Sent only to whoever owns, charms or rides the unit, so for a creature it
+  // arrives from pets, guardians, vehicles and charmed mobs and from nothing else.
+  google.protobuf.FloatValue minDamage = 60;
+  google.protobuf.FloatValue maxDamage = 61;
+  google.protobuf.FloatValue minOffHandDamage = 62;
+  google.protobuf.FloatValue maxOffHandDamage = 63;
+  google.protobuf.FloatValue minRangedDamage = 64;
+  google.protobuf.FloatValue maxRangedDamage = 65;
+  google.protobuf.Int32Value attackPower = 66;
+  google.protobuf.Int32Value attackPowerModPos = 67;
+  google.protobuf.Int32Value attackPowerModNeg = 68;
+  google.protobuf.FloatValue attackPowerMultiplier = 69;
+  google.protobuf.Int32Value rangedAttackPower = 70;
+  google.protobuf.Int32Value rangedAttackPowerModPos = 71;
+  google.protobuf.Int32Value rangedAttackPowerModNeg = 72;
+  repeated Int32ValueWrapper stats = 73;
+  repeated Int32ValueWrapper statPosBuff = 74;
+  repeated Int32ValueWrapper statNegBuff = 75;
+  repeated Int32ValueWrapper resistanceBuffModsPositive = 76;
+  repeated Int32ValueWrapper resistanceBuffModsNegative = 77;
 }
  
 message UpdateValuesGameObjectDataFields
