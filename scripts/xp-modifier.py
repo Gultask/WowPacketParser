@@ -30,7 +30,7 @@ read_dbc = import_module('read-dbc').read_dbc
 
 DB = sys.argv[1] if len(sys.argv) > 1 else 'wpp_ingest'
 MIN_KILLS = int(sys.argv[2]) if len(sys.argv) > 2 else 3
-DBC = sys.argv[3] if len(sys.argv) > 3 else r'C:\azerothcore-wotlk-build\bin\RelWithDebInfo\Data\dbc'
+DBC = sys.argv[3] if len(sys.argv) > 3 else import_module('read-dbc').DBC_DIR
 
 ELITE_RANKS = {1, 2, 3}          # elite, rare elite, boss; 4 is rare and not elite
 

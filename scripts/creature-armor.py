@@ -18,7 +18,11 @@ is the closest, and it is used only where no creature ever hit the entry.
 
   python scripts/creature-armor.py [ingest_db] [min_swings] > armor.tsv
 """
-import sys, subprocess
+import os, sys, subprocess
+from importlib import import_module
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+read_dbc = import_module('read-dbc')
 from collections import defaultdict
 
 DB = sys.argv[1] if len(sys.argv) > 1 else 'wpp_ingest'
@@ -39,10 +43,7 @@ def k(level):
 
 
 def main():
-    auras = ','.join(map(str, ARMOR_AURAS))
-    cols = ' OR '.join(f'EffectApplyAuraName{i} IN ({auras})' for i in (1, 2, 3))
-    armor_spells = {int(r[0]) for r in query('wotlkmangos', f'SELECT Id FROM spell_template WHERE {cols}')}
-    known = {int(r[0]) for r in query('wotlkmangos', 'SELECT Id FROM spell_template')}
+    armor_spells, known = read_dbc.spell_aura_types(ARMOR_AURAS)
 
     ac = {}
     for entry, name, rank, am, cls, lo, hi in query('acore_world',

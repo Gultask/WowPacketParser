@@ -5,7 +5,14 @@ The client's own Map.dbc is the only authority on which maps exist in 3.3.5, and
 AzerothCore ships map_dbc empty, so the allow-list the ingest gate needs is read
 straight out of the client install rather than hand-typed.
 """
-import struct, sys
+import os, struct, sys
+
+# The 3.3.5a client's DBC folder: the authority on what a spell id does.
+DBC_DIR = r'C:\Azeroth-WoW\dbc'
+
+# Spell.dbc field indices (3.3.5a, 234 fields): Id, then EffectApplyAuraName[3].
+SPELL_ID = 0
+SPELL_AURA_NAMES = (95, 96, 97)
 
 def read_dbc(path):
     with open(path, 'rb') as f:
@@ -20,6 +27,13 @@ def read_dbc(path):
         off = body + i * rec_size
         rows.append(struct.unpack_from('<%dI' % fields, data, off))
     return rows, data[strings:strings + str_size], fields, rec_size
+
+def spell_aura_types(aura_types, dbc_dir=DBC_DIR):
+    """Returns (spells applying any of aura_types, every spell id in Spell.dbc)."""
+    rows, _, _, _ = read_dbc(os.path.join(dbc_dir, 'Spell.dbc'))
+    wanted = set(aura_types)
+    relevant = {r[SPELL_ID] for r in rows if any(r[i] in wanted for i in SPELL_AURA_NAMES)}
+    return relevant, {r[SPELL_ID] for r in rows}
 
 def s(block, off):
     if off == 0 or off >= len(block):

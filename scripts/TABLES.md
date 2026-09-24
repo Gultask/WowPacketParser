@@ -326,8 +326,28 @@ armor, attack power, `damage_exp2`) to the digit. Where they differ, Blizzard's 
 as round numbers - Gymer 10 against AC's 1, Wyrmrest Vanquisher 4 against 7.5, Theramore Guard 2
 at every level from 53 to 57 - and TBC Anniversary trainers and vendors sit at 0.5. A
 `min_check` of `ap differs` means the creature's attack power is not AC's; the modifier is still
-exact, but the base column is AC's guess. TBC Anniversary armor runs 1-2% above AC's `basearmor`
-across the board, so treat `armor_modifier` near 1.01 as 1.
+exact, but the base column is AC's guess.
+
+TBC's base tables are not AzerothCore's. Its sheets put warriors at 1.01-1.24 of `basearmor`,
+paladins at 0.82-0.93 and mages at 0.63-0.69 depending on level, where WotLK sheets put all three
+at 1.00; below level 10 its damage also runs 0.93-1.50 of AC's. So the script also reads each
+sheet against the typical sheet for its branch, class and level (`armor_modifier_in_branch`,
+`damage_modifier_in_branch`): what is left belongs to the creature.
+
+### Settling the three modifiers
+
+`scripts/creature-modifiers.py` reads the fits' output and writes one `creature_template` UPDATE
+per entry. AC's modifiers are defaults - `DamageModifier` 1 / 7.5 / 4.6 / 13 / 35 by rank - and
+hold for 81% of normal mobs, 40% of elites and 5 of 36 bosses, so a measurement replaces AC's
+value wherever they differ by more than the measurement's error (sheet 2%, swings and XP 5%,
+armor 3%). Evidence order: sheet, then swings, for damage; sheets only for armor, since
+`creature-armor.py` runs a median 14% below AC, a bias rather than noise.
+
+Only Classic, TBC and WotLK count: they agree on melee for 95-99% of shared entries, where
+Cataclysm and Mists run 1.8x higher and Retail level-scales. Two cases are held, not written:
+a creature with heroic or 25-player versions (packets send one id for every difficulty, and
+nothing records which was measured), and a kill-XP reading of one half, which is what a party of
+two looks like - the packet's group rate reads 1 for a pair as for a lone player.
 
 A create block whose holder lost its `UpdateObject` to a spline (see `creature_waypoint`) leaves
 the sheet's first row partial: empty slots in `stats` were never sent, not zero.

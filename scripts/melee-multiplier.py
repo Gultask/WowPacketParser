@@ -23,13 +23,17 @@ clean state; where they do not, something the aura filter missed is in it.
 
 A player's summon is left out, since it hits with its owner's stats behind it. Swings are kept
 only from states where the attacker carried no aura that moves melee damage or swing time, going
-by the aura types below in 3.3.5 Spell.dbc (wotlkmangos.spell_template). A spell id Spell.dbc does
-not have is treated as relevant, since a Classic re-release can reuse or add ids and nothing says
-what they do.
+by the aura types below in the 3.3.5 client's Spell.dbc (read-dbc.DBC_DIR). A spell id Spell.dbc
+does not have is treated as relevant, since a Classic re-release can reuse or add ids and nothing
+says what they do.
 
   python scripts/melee-multiplier.py [ingest_db] [min_hits] > multipliers.tsv
 """
-import sys, json, subprocess
+import os, sys, json, subprocess
+from importlib import import_module
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+read_dbc = import_module('read-dbc')
 from collections import defaultdict
 
 DB = sys.argv[1] if len(sys.argv) > 1 else 'wpp_ingest'
@@ -62,11 +66,7 @@ def query(db, sql):
 
 
 def relevant_spells():
-    auras = ','.join(map(str, RELEVANT_AURAS))
-    cols = ' OR '.join(f'EffectApplyAuraName{i} IN ({auras})' for i in (1, 2, 3))
-    relevant = {int(r[0]) for r in query('wotlkmangos', f'SELECT Id FROM spell_template WHERE {cols}')}
-    known = {int(r[0]) for r in query('wotlkmangos', 'SELECT Id FROM spell_template')}
-    return relevant, known
+    return read_dbc.spell_aura_types(RELEVANT_AURAS)
 
 
 def main():
@@ -113,6 +113,8 @@ def main():
         db = bases[min(exp, 2)]
         lo = (db + ap / 14 * bv) * t / 1000
         hi = (db * 1.5 + ap / 14 * bv) * t / 1000
+        if lo <= 0:
+            continue          # no swing timer, or a level classlevelstats gives no damage for
         hits[key].extend((x / hi, x / lo) for x in values if x > 0)
         times[key].add(t)
         levels[key].add(level)
