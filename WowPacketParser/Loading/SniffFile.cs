@@ -98,9 +98,9 @@ namespace WowPacketParser.Loading
             }
             catch (Exception ex)
             {
-                Trace.WriteLine(_logPrefix + " " + ex.GetType());
-                Trace.WriteLine(_logPrefix + " " + ex.Message);
-                Trace.WriteLine(_logPrefix + " " + ex.StackTrace);
+                var root = ex.GetBaseException();
+                Trace.WriteLine(_logPrefix + " failed: " + root.GetType() + ": " + root.Message);
+                Trace.WriteLine(_logPrefix + " " + root.StackTrace);
                 return null;
             }
             finally
@@ -207,7 +207,7 @@ namespace WowPacketParser.Loading
 
                         var pwp = new ParallelWorkProcessor<Packet>(() => // read
                         {
-                            if (!reader.PacketReader.CanRead())
+                            if (reader.Broken || !reader.PacketReader.CanRead())
                                 return Tuple.Create<Packet, bool>(null, true);
 
                             Packet packet;

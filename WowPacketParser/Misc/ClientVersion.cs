@@ -1608,6 +1608,7 @@ namespace WowPacketParser.Misc
                 case ClientVersionBuild.V3_4_2_50664:
                 case ClientVersionBuild.V1_14_4_51146:
                 case ClientVersionBuild.V1_14_4_51535:
+                case ClientVersionBuild.V1_14_4_51056:
                 case ClientVersionBuild.V3_4_3_51505:
                 case ClientVersionBuild.V3_4_3_51572:
                 case ClientVersionBuild.V3_4_3_51666:
@@ -1723,6 +1724,7 @@ namespace WowPacketParser.Misc
                 case ClientVersionBuild.V1_15_7_60013:
                 case ClientVersionBuild.V1_15_7_60141:
                 case ClientVersionBuild.V1_15_7_60191:
+                case ClientVersionBuild.V1_15_7_60249:
                 case ClientVersionBuild.V1_15_7_60277:
                 case ClientVersionBuild.V1_15_7_60663:
                 case ClientVersionBuild.V1_15_7_60932:
@@ -2198,6 +2200,7 @@ namespace WowPacketParser.Misc
             {
                 case ClientVersionBuild.V1_14_4_51146:
                 case ClientVersionBuild.V1_14_4_51535:
+                case ClientVersionBuild.V1_14_4_51056:
                     return true;
                 default:
                     return false;
@@ -2252,6 +2255,7 @@ namespace WowPacketParser.Misc
                 case ClientVersionBuild.V1_15_7_60013:
                 case ClientVersionBuild.V1_15_7_60141:
                 case ClientVersionBuild.V1_15_7_60191:
+                case ClientVersionBuild.V1_15_7_60249:
                 case ClientVersionBuild.V1_15_7_60277:
                 case ClientVersionBuild.V1_15_7_60663:
                 case ClientVersionBuild.V1_15_7_60932:

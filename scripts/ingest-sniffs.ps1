@@ -295,12 +295,13 @@ function Invoke-Parser {
             $arguments += @('--Threads', $Threads)
         }
         $arguments += $Files
-        $output = & $Parser @arguments 2>&1
-        foreach ($item in $output) {
-            $text = "$item"
+        # Streamed, not collected: a corrupt sniff once printed 845 MB of trace, and holding a
+        # whole batch's output in memory before logging any of it stalled the run for good.
+        & $Parser @arguments 2>&1 | ForEach-Object {
+            $text = "$_"
             # The parser prints a progress fraction per packet; only keep the lines that matter.
             # 'tried to overwrite delegate' is long standing parser noise on Classic builds.
-            if ($text -match 'Recorded as sniff|recorded|map gate|no loot -|Skipped -|WARNING|Could not|rror' -and
+            if ($text -match 'Recorded as sniff|recorded|map gate|no loot -|Skipped -|WARNING|Could not|rror| failed: |no client locale|could not be read' -and
                 $text -notmatch 'tried to overwrite delegate') {
                 Write-Log $text.Trim()
             }

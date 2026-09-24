@@ -29,6 +29,9 @@ namespace WowPacketParser.Loading
             }
         }
 
+        /// <summary>A read failed; nothing after it can be framed, so reading should stop.</summary>
+        public bool Broken { get; private set; }
+
         private int _packetNum;
         private int _count;
 
@@ -63,10 +66,12 @@ namespace WowPacketParser.Loading
             }
             catch (Exception ex)
             {
-                Trace.WriteLine(ex.Data);
-                Trace.WriteLine(ex.GetType());
-                Trace.WriteLine(ex.Message);
-                Trace.WriteLine(ex.StackTrace);
+                // A packet that cannot be read leaves the stream mid-record, and every "packet"
+                // after it is misframed garbage. Carrying on steps through the rest of the file a
+                // few bytes at a time - one corrupt 37 MB capture threw 3.1 million exceptions and
+                // 845 MB of trace this way - so stop reading the file here instead.
+                Broken = true;
+                Trace.WriteLine($"Packet {_packetNum} of {FileName} could not be read ({ex.GetType().Name}: {ex.Message}) - the rest of the file is unreadable, stopping here");
             }
 
             packet = null;

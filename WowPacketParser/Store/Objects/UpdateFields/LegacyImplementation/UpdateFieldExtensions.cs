@@ -49,7 +49,7 @@ namespace WowPacketParser.Store.Objects.UpdateFields.LegacyImplementation
         public static TK GetValue<T, TK>(this Dictionary<int, UpdateField> dict, T updateField) where T: Enum
         {
             UpdateField uf;
-            if (dict.TryGetValue(Enums.Version.UpdateFields.GetUpdateField(updateField), out uf))
+            if (dict != null && dict.TryGetValue(Enums.Version.UpdateFields.GetUpdateField(updateField), out uf))
             {
                 var type = GetTypeCodeOfReturnValue<TK>();
                 switch (type)
@@ -81,7 +81,7 @@ namespace WowPacketParser.Store.Objects.UpdateFields.LegacyImplementation
         public static IEnumerable<TK> GetValue<T, TK>(this Dictionary<int, List<UpdateField>> dict, T updateField) where T: Enum
         {
             List<UpdateField> ufs;
-            if (dict.TryGetValue(Enums.Version.UpdateFields.GetUpdateField(updateField), out ufs))
+            if (dict != null && dict.TryGetValue(Enums.Version.UpdateFields.GetUpdateField(updateField), out ufs))
             {
                 var type = GetTypeCodeOfReturnValue<TK>();
                 switch (type)
@@ -121,7 +121,7 @@ namespace WowPacketParser.Store.Objects.UpdateFields.LegacyImplementation
                 var updateField = Enums.Version.UpdateFields.GetUpdateField(firstUpdateField);
                 if (updateField == -1)
                     continue;
-                if (dict.TryGetValue(updateField + i, out uf))
+                if (dict != null && dict.TryGetValue(updateField + i, out uf))
                 {
                     switch (type)
                     {
@@ -163,7 +163,7 @@ namespace WowPacketParser.Store.Objects.UpdateFields.LegacyImplementation
             try
             {
                 UpdateField uf;
-                if (dict.TryGetValue(Enums.Version.UpdateFields.GetUpdateField(updateField), out uf))
+                if (dict != null && dict.TryGetValue(Enums.Version.UpdateFields.GetUpdateField(updateField), out uf))
                     return (TK)Enum.Parse(typeof(TK).GetGenericArguments()[0], uf.UInt32Value.ToString(CultureInfo.InvariantCulture));
             }
             catch (OverflowException) // Data wrongly parsed can result in very wtfy values

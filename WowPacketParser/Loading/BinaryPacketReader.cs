@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Text;
@@ -149,11 +150,24 @@ namespace WowPacketParser.Loading
 
         static void SetBuild(uint build)
         {
+            // An unlisted build fails deep inside a static constructor, which leaves UpdateFields
+            // unusable - and the process hung - for every file after it. Refuse it here instead.
+            if (!Enum.IsDefined(typeof(ClientVersionBuild), (ClientVersionBuild)build))
+                throw new InvalidDataException($"Client build {build} is not in ClientVersionBuild - add it before parsing.");
+
             ClientVersion.SetVersion((ClientVersionBuild)build);
         }
 
         static void SetLocale(string locale)
         {
+            // Some sniffers write the locale as four zero bytes. Nothing else in the header is
+            // wrong, so read those as enUS rather than throwing the whole capture away.
+            locale = locale.TrimEnd('\0');
+            if (locale.Length == 0)
+            {
+                Trace.WriteLine("Sniff header has no client locale - reading it as enUS");
+                locale = "enUS";
+            }
             ClientLocale.SetLocale(locale);
         }
 
