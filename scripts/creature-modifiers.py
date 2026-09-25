@@ -18,13 +18,20 @@ Evidence, best first (the fits are separate scripts; run them into one folder fi
 creature-armor.py is deliberately not used: armor read back out of damage reduction runs a median
 14% below AzerothCore with only a quarter of rows within 5%, a bias not a spread.
 
-Only Classic, TBC and WotLK captures count. Those three agree on melee (95-99% of shared entries
-within 5%); Cataclysm and Mists run 1.8x higher on the same entries, and Retail level-scales.
-Where several branches measured an entry, the latest of the three wins.
+Only TBC and WotLK captures count, and WotLK wins where both measured an entry. Cataclysm and
+Mists run 1.8x higher on the same entries, and Retail level-scales. Classic is left out too: it is
+1.12 tuning, before 2.3 de-elited whole areas (Jintha'Alor, Mannoroc Coven), and its captures
+carry no query responses to say which creatures were elite then.
+
+A reading only counts where the branch that took it agrees with AzerothCore on whether the
+creature is elite; where it does not, the rank is the question, not the modifier, and the entry is
+held. Raids from before WotLK are held too: WotLK Classic's swings there run 0.75 of TBC
+Anniversary's for the same creature at the same level (Karazhan's Phantom Hound, Fiendish Imp and
+Malchezaar's Axes all read 0.75), so which of the two 3.3.5 had is not settled by the corpus.
+Such an entry is set only where both branches measured it and agree.
 
 A sheet's modifier is taken at AzerothCore's own damage column (exp), so the result reproduces
-the observed damage without also changing exp. Kill XP is measured against the sniff's rank and
-re-expressed against AzerothCore's, since AzerothCore doubles XP for its own idea of elite.
+the observed damage without also changing exp.
 
 Values snap to the grid Blizzard's own numbers sit on (0.05 below 2, 0.25 below 10, 0.5 above)
 when that is within the measurement's error, and are otherwise kept to two decimals.
@@ -34,11 +41,16 @@ when that is within the measurement's error, and are otherwise kept to two decim
 """
 import csv, os, subprocess, sys
 from collections import defaultdict
+from importlib import import_module
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+read_dbc = import_module('read-dbc')
 
 FOLDER = sys.argv[1] if len(sys.argv) > 1 else '.'
-BRANCHES = ('WotLK', 'TBC', 'Classic')      # preference order
+BRANCHES = ('WotLK', 'TBC')                 # preference order
 MIN_HITS = 30                               # clean white swings for a melee reading
 MIN_KILLS = 3
+MIN_XP_SNIFFS = 2                            # one player grouped all session reads clean and wrong
 MIN_AT_MEDIAN = 0.5                          # share of kills at the median; less means grouping
 ELITE_RANKS = {1, 2, 3}
 HALF_XP = (0.45, 0.55)                       # a duo's share: see ExperienceModifier below
@@ -65,12 +77,23 @@ def snap(x, error):
     return g if g > 0 and abs(g - x) <= error * x else round(x, 2)
 
 
+def old_raid_maps():
+    """Raid maps from before WotLK, by the 3.3.5 client's Map.dbc (InstanceType 2, expansion < 2)."""
+    rows, _, _, _ = read_dbc.read_dbc(os.path.join(read_dbc.DBC_DIR, 'Map.dbc'))
+    # Onyxia's Lair is on the list by Map.dbc, but 3.2 rebuilt her at level 80: WotLK is the truth there.
+    return {r[0] for r in rows if r[2] == 2 and r[63] < 2} - {249}
+
+
 def best(rows, key):
     """The row from the latest branch; within a branch, the best supported one."""
     by = defaultdict(list)
     for r in rows:
         by[int(r['entry'])].append(r)
     return {e: min(rs, key=lambda r: (BRANCHES.index(r['branch']), -key(r))) for e, rs in by.items()}
+
+
+def join(*notes):
+    return '; '.join(n for n in notes if n)
 
 
 def main():
@@ -81,13 +104,51 @@ def main():
         ac[int(entry)] = dict(name=name, rank=int(rank), cls=int(cls), DamageModifier=float(dm),
                               ExperienceModifier=float(xp), ArmorModifier=float(am), variants=int(variants) > 0)
 
+    branch_elite = {}                 # (entry, branch) -> elite in that branch's query responses
+    for entry, branch, rank in query('wpp_ingest', 'SELECT t.entry, s.branch, MAX(t.`rank`) FROM creature_template t '
+                                                   'JOIN sniff s ON s.id = t.sniff_id GROUP BY t.entry, s.branch'):
+        branch_elite[(int(entry), branch)] = int(rank) in ELITE_RANKS
+
+    raids = old_raid_maps()
+    in_old_raid = {int(e) for (e,) in query('acore_world', 'SELECT DISTINCT id FROM creature WHERE map IN (%s)'
+                                                         % ','.join(map(str, raids)))}
+    in_old_raid |= {int(e) for (e,) in query('wpp_ingest', 'SELECT DISTINCT entry FROM creature_melee WHERE map IN (%s) '
+                                                         'UNION SELECT DISTINCT entry FROM creature_stats WHERE map IN (%s)'
+                                                         % ((','.join(map(str, raids)),) * 2))}
+
+    def rank_note(entry, branch):
+        """Why a branch's reading does not apply to AzerothCore's template, or ''."""
+        elite = branch_elite.get((entry, branch))
+        if elite is None or elite == (ac[entry]['rank'] in ELITE_RANKS):
+            return ''
+        return f"{branch} {'elite' if elite else 'normal'}, AC rank {ac[entry]['rank']}"
+
     stat_rows = [r for r in load('stats.tsv') if r['verdict'] != 'mixed' and int(r['entry']) in ac]
     sheets = best(stat_rows, lambda r: int(r['sheets']))
 
     melee = best([r for r in load('melee.tsv') if r['verdict'] != 'mixed' and int(r['hits']) >= MIN_HITS],
                  lambda r: int(r['hits']))
     kills = best([r for r in load('xp.tsv') if r['verdict'] != 'grouped' and int(r['kills']) >= MIN_KILLS
-                  and float(r['at_median']) >= MIN_AT_MEDIAN], lambda r: int(r['kills']))
+                  and float(r['at_median']) >= MIN_AT_MEDIAN and int(r['sniffs_at_median']) >= MIN_XP_SNIFFS],
+                 lambda r: int(r['kills']))
+    all_melee = defaultdict(dict)     # entry -> branch -> k, for the old-raid cross-check
+    for r in load('melee.tsv'):
+        if r['verdict'] != 'mixed' and int(r['hits']) >= MIN_HITS:
+            all_melee[int(r['entry'])][r['branch']] = float(r['k'])
+    all_sheets = defaultdict(dict)
+    for r in stat_rows:
+        if r['damage_modifier_in_branch']:
+            all_sheets[int(r['entry'])][r['branch']] = float(r['damage_modifier_in_branch'])
+
+    def old_raid_note(entry, source):
+        """Held unless TBC and WotLK both measured the entry and agree."""
+        if entry not in in_old_raid:
+            return ''
+        seen = (all_sheets if source == 'sheet' else all_melee)[entry]
+        if 'TBC' in seen and 'WotLK' in seen and abs(seen['WotLK'] / seen['TBC'] - 1) <= TOLERANCE[source]:
+            return ''
+        return 'pre-WotLK raid: ' + (f"TBC {seen['TBC']:g}, WotLK {seen['WotLK']:g}" if len(seen) == 2
+                                     else f'{next(iter(seen))} only')
 
     decisions = []        # entry, field, ac value, measured, new value, source, branch, evidence, note
 
@@ -104,33 +165,30 @@ def main():
             note = ''
             if m and abs(float(m['k']) / value - 1) > TOLERANCE['melee']:
                 note = f"swings read {m['k']}"
-            decisions.append((entry, 'DamageModifier', value, source, branch, evidence, note))
+            decisions.append((entry, 'DamageModifier', value, source, branch, evidence,
+                              join(note, rank_note(entry, branch), old_raid_note(entry, source))))
         elif m:
             decisions.append((entry, 'DamageModifier', float(m['k']), 'melee', m['branch'],
-                              f"{m['hits']} swings, k {m['k_lo']}-{m['k_hi']}", ''))
+                              f"{m['hits']} swings, k {m['k_lo']}-{m['k_hi']}",
+                              join(rank_note(entry, m['branch']), old_raid_note(entry, 'melee'))))
 
-        # ArmorModifier: sheets only.
         # ArmorModifier: sheets only, each read against its own branch's base armor at that class
         # and level (creature-stats.py), since TBC's is not AzerothCore's.
         if s and s['armor_modifier_in_branch']:
             decisions.append((entry, 'ArmorModifier', float(s['armor_modifier_in_branch']), 'armor', s['branch'],
-                              f"{s['sheets']} sheets, {s['armor_modifier']} of basearmor", ''))
+                              f"{s['sheets']} sheets, {s['armor_modifier']} of basearmor",
+                              rank_note(entry, s['branch'])))
 
-        # ExperienceModifier: the measured modifier is against the sniff's rank; AzerothCore
-        # doubles for its own rank, so carry the doubling across.
+        # ExperienceModifier: measured against the branch's own rank, which must be AzerothCore's.
         k = kills.get(entry)
         if k:
-            sniff_elite = int(k['sniff_rank']) in ELITE_RANKS
-            ac_elite = tpl['rank'] in ELITE_RANKS
-            value = float(k['measured_modifier']) * (2 if sniff_elite else 1) / (2 if ac_elite else 1)
-            note = '' if sniff_elite == ac_elite else f"sniff rank {k['sniff_rank']}, AC rank {tpl['rank']}"
             # A party of two reports the same group rate as a lone player and each gets about half,
             # so a creature mostly killed as a pair reads 0.5. Until creature_xp records party
             # size, a half is not told apart from a real 0.5 and is left alone.
-            if HALF_XP[0] <= float(k['measured_modifier']) <= HALF_XP[1]:
-                note = (note + '; ' if note else '') + 'half: party of two?'
-            decisions.append((entry, 'ExperienceModifier', value, 'xp', k['branch'],
-                              f"{k['kills']} kills, {k['at_median']} at median", note))
+            half = 'half: party of two?' if HALF_XP[0] <= float(k['measured_modifier']) <= HALF_XP[1] else ''
+            decisions.append((entry, 'ExperienceModifier', float(k['measured_modifier']), 'xp', k['branch'],
+                              f"{k['kills']} kills in {k['sniffs_at_median']} sniffs, {k['at_median']} at median",
+                              join(rank_note(entry, k['branch']), half)))
 
     out = csv.writer(sys.stdout, delimiter='\t', lineterminator='\n')
     out.writerow(['entry', 'name', 'ac_rank', 'field', 'ac_value', 'measured', 'new_value', 'action',
@@ -147,7 +205,7 @@ def main():
         # AzerothCore gives each its own template; nothing recorded says which one was measured.
         if tpl['variants']:
             note = (note + '; ' if note else '') + 'difficulty unknown'
-        held = 'party of two' in note or 'difficulty unknown' in note
+        held = any(why in note for why in ('party of two', 'difficulty unknown', 'AC rank', 'pre-WotLK raid'))
         action = 'keep' if keep or new == current else 'hold' if held else 'set'
         out.writerow([entry, tpl['name'], tpl['rank'], field, current, f'{measured:.3f}',
                       new if action == 'set' else current, action, source, branch, evidence, note])
