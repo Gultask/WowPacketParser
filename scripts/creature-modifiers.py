@@ -25,10 +25,10 @@ carry no query responses to say which creatures were elite then.
 
 A reading only counts where the branch that took it agrees with AzerothCore on whether the
 creature is elite; where it does not, the rank is the question, not the modifier, and the entry is
-held. Raids from before WotLK are held too: WotLK Classic's swings there run 0.75 of TBC
-Anniversary's for the same creature at the same level (Karazhan's Phantom Hound, Fiendish Imp and
-Malchezaar's Axes all read 0.75), so which of the two 3.3.5 had is not settled by the corpus.
-Such an entry is set only where both branches measured it and agree.
+held. Raids from before WotLK take TBC's reading instead of WotLK's: WotLK Classic's swings there
+run 0.75 of TBC Anniversary's for the same creature at the same level (Karazhan's Phantom Hound,
+Fiendish Imp and Malchezaar's Axes all read 0.75), and the TBC numbers are the ones kept. An entry
+there that only WotLK measured is held, leaving AzerothCore's value.
 
 A sheet's modifier is taken at AzerothCore's own damage column (exp), so the result reproduces
 the observed damage without also changing exp.
@@ -84,12 +84,18 @@ def old_raid_maps():
     return {r[0] for r in rows if r[2] == 2 and r[63] < 2} - {249}
 
 
-def best(rows, key):
-    """The row from the latest branch; within a branch, the best supported one."""
+def best(rows, key, tbc_first=frozenset()):
+    """The row from the latest branch; within a branch, the best supported one. Entries in
+    tbc_first take a TBC row whenever there is one."""
     by = defaultdict(list)
     for r in rows:
         by[int(r['entry'])].append(r)
-    return {e: min(rs, key=lambda r: (BRANCHES.index(r['branch']), -key(r))) for e, rs in by.items()}
+    out = {}
+    for e, rs in by.items():
+        if e in tbc_first and any(r['branch'] == 'TBC' for r in rs):
+            rs = [r for r in rs if r['branch'] == 'TBC']
+        out[e] = min(rs, key=lambda r: (BRANCHES.index(r['branch']), -key(r)))
+    return out
 
 
 def join(*notes):
@@ -124,31 +130,16 @@ def main():
         return f"{branch} {'elite' if elite else 'normal'}, AC rank {ac[entry]['rank']}"
 
     stat_rows = [r for r in load('stats.tsv') if r['verdict'] != 'mixed' and int(r['entry']) in ac]
-    sheets = best(stat_rows, lambda r: int(r['sheets']))
+    sheets = best(stat_rows, lambda r: int(r['sheets']), in_old_raid)
 
     melee = best([r for r in load('melee.tsv') if r['verdict'] != 'mixed' and int(r['hits']) >= MIN_HITS],
-                 lambda r: int(r['hits']))
+                 lambda r: int(r['hits']), in_old_raid)
     kills = best([r for r in load('xp.tsv') if r['verdict'] != 'grouped' and int(r['kills']) >= MIN_KILLS
                   and float(r['at_median']) >= MIN_AT_MEDIAN and int(r['sniffs_at_median']) >= MIN_XP_SNIFFS],
                  lambda r: int(r['kills']))
-    all_melee = defaultdict(dict)     # entry -> branch -> k, for the old-raid cross-check
-    for r in load('melee.tsv'):
-        if r['verdict'] != 'mixed' and int(r['hits']) >= MIN_HITS:
-            all_melee[int(r['entry'])][r['branch']] = float(r['k'])
-    all_sheets = defaultdict(dict)
-    for r in stat_rows:
-        if r['damage_modifier_in_branch']:
-            all_sheets[int(r['entry'])][r['branch']] = float(r['damage_modifier_in_branch'])
-
-    def old_raid_note(entry, source):
-        """Held unless TBC and WotLK both measured the entry and agree."""
-        if entry not in in_old_raid:
-            return ''
-        seen = (all_sheets if source == 'sheet' else all_melee)[entry]
-        if 'TBC' in seen and 'WotLK' in seen and abs(seen['WotLK'] / seen['TBC'] - 1) <= TOLERANCE[source]:
-            return ''
-        return 'pre-WotLK raid: ' + (f"TBC {seen['TBC']:g}, WotLK {seen['WotLK']:g}" if len(seen) == 2
-                                     else f'{next(iter(seen))} only')
+    def old_raid_note(entry, branch):
+        """A pre-WotLK raid reading that is not TBC's: WotLK Classic runs 0.75 of it there."""
+        return 'pre-WotLK raid: WotLK only' if entry in in_old_raid and branch != 'TBC' else ''
 
     decisions = []        # entry, field, ac value, measured, new value, source, branch, evidence, note
 
@@ -159,6 +150,8 @@ def main():
 
         # DamageModifier: the sheet if there is one, else the swings.
         s, m = sheets.get(entry), melee.get(entry)
+        if entry in in_old_raid and m and m['branch'] == 'TBC' and s and s['branch'] != 'TBC':
+            s = None          # a TBC swing reading beats a WotLK sheet in a pre-WotLK raid
         if s and s['damage_modifier_in_branch']:
             value, source, branch = float(s['damage_modifier_in_branch']), 'sheet', s['branch']
             evidence = f"{s['sheets']} sheets, exp {s['exp']} (AC {s['ac_exp']})"
@@ -166,11 +159,11 @@ def main():
             if m and abs(float(m['k']) / value - 1) > TOLERANCE['melee']:
                 note = f"swings read {m['k']}"
             decisions.append((entry, 'DamageModifier', value, source, branch, evidence,
-                              join(note, rank_note(entry, branch), old_raid_note(entry, source))))
+                              join(note, rank_note(entry, branch), old_raid_note(entry, branch))))
         elif m:
             decisions.append((entry, 'DamageModifier', float(m['k']), 'melee', m['branch'],
                               f"{m['hits']} swings, k {m['k_lo']}-{m['k_hi']}",
-                              join(rank_note(entry, m['branch']), old_raid_note(entry, 'melee'))))
+                              join(rank_note(entry, m['branch']), old_raid_note(entry, m['branch']))))
 
         # ArmorModifier: sheets only, each read against its own branch's base armor at that class
         # and level (creature-stats.py), since TBC's is not AzerothCore's.
