@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WowPacketParser.Misc;
 
 namespace WowPacketParser.Store.Objects
 {
@@ -12,6 +13,11 @@ namespace WowPacketParser.Store.Objects
         public ulong SniffId;
         public uint Entry;
         public uint Map;
+        public uint? Difficulty;
+
+        /// <summary>The stay it was folded in; not stored. Difficulty is settled from it once the file is read.</summary>
+        public MapVisit Visit;
+
         public string Owner;
         public uint Level;
         public uint AttackTime;
@@ -41,6 +47,8 @@ namespace WowPacketParser.Store.Objects
         public ulong SniffId;
         public uint Entry;
         public uint Map;
+        public uint? Difficulty;
+        public MapVisit Visit;
         public uint Level;
         public int Armor = -1;
         public string Auras;
@@ -64,6 +72,8 @@ namespace WowPacketParser.Store.Objects
         public ulong SniffId;
         public uint Entry;
         public uint Map;
+        public uint? Difficulty;
+        public MapVisit Visit;
         public uint Zone;
         public uint Level;
         public uint PlayerLevel;
@@ -88,6 +98,8 @@ namespace WowPacketParser.Store.Objects
         public string UnitType;
         public string Relation;
         public uint Map;
+        public uint? Difficulty;
+        public MapVisit Visit;
         public uint Level;
         public uint Class;
         public string Auras;

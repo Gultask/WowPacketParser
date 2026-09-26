@@ -21,6 +21,14 @@ namespace WowPacketParser.Store.Objects
         public string Guid;
         public uint Entry;
         public uint Map;
+
+        /// <summary>
+        /// DifficultyID of the stay the creature was created in (see MapVisits); null when the
+        /// sniff never said. Every other table about the creature takes the same value, so its
+        /// spawn, walk, casts and loot never land on different difficulties.
+        /// </summary>
+        public uint? Difficulty;
+
         public int? AreaId;
         public int? ZoneId;
 

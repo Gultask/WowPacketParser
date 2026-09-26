@@ -22,6 +22,7 @@ namespace WowPacketParser.Store.Objects
         public string Guid;
         public uint Entry;
         public uint Map;
+        public uint? Difficulty;
 
         public int Points;
         public int Segments;

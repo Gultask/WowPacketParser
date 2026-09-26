@@ -918,6 +918,11 @@ namespace WowPacketParser.Loading
                 coverage.Add(Coverage(CollectorVersion.AreaTriggerTeleport, CollectorVersion.AreaTriggerTeleportVersion,
                                       teleWritten, Opcode.CMSG_AREA_TRIGGER));
 
+                var visits = MapVisits.Visits;
+                var visitWritten = IngestDatabase.SaveMapVisits(sniffId, visits);
+                coverage.Add(Coverage(CollectorVersion.MapVisit, CollectorVersion.MapVisitVersion,
+                                      visitWritten, Opcode.SMSG_WORLD_SERVER_INFO));
+
                 // The census counts every packet, including maps that yielded nothing and maps
                 // that were gated away entirely - which is the only record that they were ever
                 // in the file, since nothing else survives the gate.
@@ -1041,6 +1046,7 @@ namespace WowPacketParser.Loading
                     Guid = pair.Key,
                     Entry = points[0].Entry,
                     Map = points[0].Map,
+                    Difficulty = points[0].Difficulty,
                     Points = points.Count,
                     Segments = segments.Count,
                     MultiPointSegments = multi.Count,
@@ -1100,6 +1106,12 @@ namespace WowPacketParser.Loading
             };
         }
 
+        /// <summary>
+        /// The difficulty of the stay an object was created in. Everything about a creature takes
+        /// this one value, so its spawn, walk, casts, values and loot always agree on it.
+        /// </summary>
+        private static uint? DifficultyOf(WoWObject obj) => MapVisits.DifficultyAt(obj.PacketNumber, obj.Map);
+
         private List<GameObjectSpawnRecord> CollectGameObjectSpawns(ulong sniffId)
         {
             var spawns = new List<GameObjectSpawnRecord>();
@@ -1140,6 +1152,7 @@ namespace WowPacketParser.Loading
                     Guid = $"0x{pair.Key.High:X16}{pair.Key.Low:X16}",
                     Entry = (uint)entry,
                     Map = obj.Map,
+                    Difficulty = DifficultyOf(obj),
                     AreaId = obj.Area != -1 ? obj.Area : null,
                     ZoneId = obj.Zone != -1 ? obj.Zone : null,
                     PositionX = obj.Movement.Position.X,
@@ -1194,7 +1207,7 @@ namespace WowPacketParser.Loading
                 return casts;
 
             // Spell packets carry no map, so take it from the object that cast.
-            var units = new Dictionary<string, (uint Entry, uint Map)>();
+            var units = new Dictionary<string, (uint Entry, uint Map, uint? Difficulty)>();
             foreach (var pair in Storage.Objects)
             {
                 var obj = pair.Value.Item1;
@@ -1205,7 +1218,7 @@ namespace WowPacketParser.Loading
                 if (unitEntry == null || unitEntry == 0)
                     continue;
 
-                units[GuidKey(pair.Key)] = ((uint)unitEntry, obj.Map);
+                units[GuidKey(pair.Key)] = ((uint)unitEntry, obj.Map, DifficultyOf(obj));
             }
 
             var targetHits = new Dictionary<(uint Spell, uint Caster, uint Target), SpellTargetRecord>();
@@ -1265,6 +1278,7 @@ namespace WowPacketParser.Loading
                             Guid = casterKey,
                             Entry = caster.Entry,
                             Map = caster.Map,
+                            Difficulty = caster.Difficulty,
                             SpellId = data.Spell,
                             StartedUtc = seen
                         };
@@ -1807,7 +1821,7 @@ namespace WowPacketParser.Loading
             if (packets == null)
                 return aggro;
 
-            var known = new Dictionary<string, (uint Entry, uint Map)>();
+            var known = new Dictionary<string, (uint Entry, uint Map, uint? Difficulty)>();
             foreach (var pair in Storage.Objects)
             {
                 var obj = pair.Value.Item1;
@@ -1818,7 +1832,7 @@ namespace WowPacketParser.Loading
                 if (entry == null || entry == 0)
                     continue;
 
-                known[GuidKey(pair.Key)] = ((uint)entry, obj.Map);
+                known[GuidKey(pair.Key)] = ((uint)entry, obj.Map, DifficultyOf(obj));
             }
 
             var seen = new HashSet<(string, DateTime)>();
@@ -1841,6 +1855,7 @@ namespace WowPacketParser.Loading
                     Guid = key,
                     Entry = unit.Entry,
                     Map = unit.Map,
+                    Difficulty = unit.Difficulty,
                     AggroUtc = when
                 });
             }
@@ -1854,7 +1869,7 @@ namespace WowPacketParser.Loading
         /// </summary>
         private List<CreatureValueRecord> CollectCreatureValues(ulong sniffId)
         {
-            var known = new Dictionary<string, (uint Entry, uint Map)>();
+            var known = new Dictionary<string, (uint Entry, uint Map, uint? Difficulty)>();
             foreach (var pair in Storage.Objects)
             {
                 var obj = pair.Value.Item1;
@@ -1866,7 +1881,7 @@ namespace WowPacketParser.Loading
                     continue;
 
                 var key = GuidKey(pair.Key);
-                known[key] = ((uint)entry, obj.Map);
+                known[key] = ((uint)entry, obj.Map, DifficultyOf(obj));
 
                 if (obj.Movement != null)
                 {
@@ -1889,8 +1904,8 @@ namespace WowPacketParser.Loading
                 valuesPerGuid[k] = n + 1;
             }
 
-            var changedGuids = new Dictionary<(uint Entry, uint Map, string Field), HashSet<string>>();
-            var aggregated = new Dictionary<(uint Entry, uint Map, string Field, decimal Value), CreatureValueRecord>();
+            var changedGuids = new Dictionary<(uint Entry, uint Map, uint? Difficulty, string Field), HashSet<string>>();
+            var aggregated = new Dictionary<(uint Entry, uint Map, uint? Difficulty, string Field, decimal Value), CreatureValueRecord>();
 
             foreach (var pair in _creatureValues)
             {
@@ -1898,7 +1913,7 @@ namespace WowPacketParser.Loading
                 if (!known.TryGetValue(id.Guid, out var unit))
                     continue;
 
-                var key = (unit.Entry, unit.Map, id.Field, id.Value);
+                var key = (unit.Entry, unit.Map, unit.Difficulty, id.Field, id.Value);
                 if (!aggregated.TryGetValue(key, out var row))
                 {
                     row = new CreatureValueRecord
@@ -1906,6 +1921,7 @@ namespace WowPacketParser.Loading
                         SniffId = sniffId,
                         Entry = unit.Entry,
                         Map = unit.Map,
+                        Difficulty = unit.Difficulty,
                         Field = id.Field,
                         Value = id.Value
                     };
@@ -1921,7 +1937,7 @@ namespace WowPacketParser.Loading
 
                 if (valuesPerGuid.TryGetValue((id.Guid, id.Field), out var held) && held > 1)
                 {
-                    var ck = (unit.Entry, unit.Map, id.Field);
+                    var ck = (unit.Entry, unit.Map, unit.Difficulty, id.Field);
                     if (!changedGuids.TryGetValue(ck, out var set))
                         changedGuids[ck] = set = new HashSet<string>();
                     set.Add(id.Guid);
@@ -1930,7 +1946,7 @@ namespace WowPacketParser.Loading
 
             foreach (var row in aggregated.Values)
             {
-                if (changedGuids.TryGetValue((row.Entry, row.Map, row.Field), out var set))
+                if (changedGuids.TryGetValue((row.Entry, row.Map, row.Difficulty, row.Field), out var set))
                     row.ChangedGuids = set.Count;
             }
 
@@ -2356,6 +2372,7 @@ namespace WowPacketParser.Loading
                     Guid = GuidKey(pair.Key),
                     Entry = (uint)entry,
                     Map = obj.Map,
+                    Difficulty = DifficultyOf(obj),
                     ItemId1 = gear.ItemID1 ?? 0,
                     ItemId2 = gear.ItemID2 ?? 0,
                     ItemId3 = gear.ItemID3 ?? 0
@@ -2571,6 +2588,7 @@ namespace WowPacketParser.Loading
                     Guid = $"0x{pair.Key.High:X16}{pair.Key.Low:X16}",
                     Entry = (uint)entry,
                     Map = obj.Map,
+                    Difficulty = DifficultyOf(obj),
                     AreaId = obj.Area != -1 ? obj.Area : null,
                     ZoneId = obj.Zone != -1 ? obj.Zone : null,
                     PositionX = pos.X,
@@ -2639,11 +2657,11 @@ namespace WowPacketParser.Loading
             // This does lose the summons that genuinely do have an authored path. They are event
             // content and the sniff can be read directly for those; the corpus is here for the
             // ordinary overworld spawn.
-            var maps = new Dictionary<string, uint>();
+            var maps = new Dictionary<string, (uint Map, uint? Difficulty)>();
             foreach (var pair in Storage.Objects)
             {
                 if (pair.Value.Item1.Type == ObjectType.Unit && !pair.Value.Item1.IsTemporarySpawn())
-                    maps[GuidKey(pair.Key)] = pair.Value.Item1.Map;
+                    maps[GuidKey(pair.Key)] = (pair.Value.Item1.Map, DifficultyOf(pair.Value.Item1));
             }
 
             var combat = CombatWindows(packets);
@@ -2678,7 +2696,7 @@ namespace WowPacketParser.Loading
                     continue;
 
                 var key = GuidKey(move.Mover);
-                if (key == null || !maps.TryGetValue(key, out var map) ||
+                if (key == null || !maps.TryGetValue(key, out var where) ||
                     InCombat(combat, key, holder.BaseData?.Number ?? 0, holder.BaseData?.Time?.ToDateTime()))
                     continue;
 
@@ -2736,7 +2754,8 @@ namespace WowPacketParser.Loading
                         SniffId = sniffId,
                         Guid = key,
                         Entry = move.Mover.Entry,
-                        Map = map,
+                        Map = where.Map,
+                        Difficulty = where.Difficulty,
                         SegmentId = segmentId,
                         PointIndex = i,
                         SegmentPoints = points.Count,
@@ -2797,6 +2816,7 @@ namespace WowPacketParser.Loading
                     loot.OwnerEntry = owner.ObjectData?.EntryID is > 0 ? (uint?)owner.ObjectData.EntryID : null;
                     loot.OwnerType = owner.Type.ToString();
                     loot.Map = owner.Map;
+                    loot.Difficulty = DifficultyOf(owner);
 
                     if (owner is Unit unit)
                         loot.OwnerLevel = unit.UnitData.Level;

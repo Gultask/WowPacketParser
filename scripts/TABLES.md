@@ -16,6 +16,7 @@ the only tables that cannot be rebuilt without re-reading the sniffs, which take
 | `sniff` | file | build, branch, packet counts, clock. Everything else hangs off `sniff_id`. `file_crc32` is what 7-Zip lists, so `ingest-sniffs.ps1` can pass an archive over unopened. |
 | `ingest_archive` | archive inside an archive | written by `ingest-sniffs.ps1`, not the parser: nested archives that finished, by the CRC their parent lists |
 | `sniff_map` | sniff × map | yield per map, plus the packet census and how many were gated |
+| `sniff_map_visit` | stay on a map | world change to world change, with the difficulty it was in; see `difficulty` below |
 | `sniff_coverage` | sniff × capability | what this sniff *could* give up; see below |
 | `map_validity` | target × map | which branches' terrain matches 3.3.5, and what rebuilt the rest |
 | `creature_spawn` | sniff × creature | position, level, faction, flags. Dead creatures excluded. |
@@ -346,11 +347,31 @@ armor 3%). Evidence order: sheet, then swings, for damage; sheets only for armor
 Only Classic, TBC and WotLK count: they agree on melee for 95-99% of shared entries, where
 Cataclysm and Mists run 1.8x higher and Retail level-scales. Two cases are held, not written:
 a creature with heroic or 25-player versions (packets send one id for every difficulty, and
-nothing records which was measured), and a kill-XP reading of one half, which is what a party of
-two looks like - the packet's group rate reads 1 for a pair as for a lone player.
+until the corpus is re-ingested with `difficulty` nothing records which was measured), and a
+kill-XP reading of one half, which is what a party of two looks like - the packet's group rate
+reads 1 for a pair as for a lone player.
 
 A create block whose holder lost its `UpdateObject` to a spline (see `creature_waypoint`) leaves
 the sheet's first row partial: empty slots in `stats` were never sent, not zero.
+
+### `difficulty` is the stay the creature was created in
+
+Every table with a `map` carries `difficulty` beside it: the DifficultyID of
+SMSG_WORLD_SERVER_INFO, which names the instance the client is in (1 normal, 2 heroic, 3-6 the
+10/25 raids; 0 in the open world), not the one it has selected. `creature_value` and
+`creature_equip` key on it, so a heroic and a normal reading of one entry never merge. Rows are
+kept apart rather than combined into a spawn mask.
+
+The packet never arrives with the map. After SMSG_NEW_WORLD the first SMSG_UPDATE_OBJECT - the
+room the player lands in, 41-183 creatures in the captures checked - comes before it, and at
+login it can come either side of SMSG_LOGIN_VERIFY_WORLD. So the value is not "the last one
+announced": the parser records each stay in `sniff_map_visit` and gives a creature the
+difficulty of the stay it was created in, once the whole file is read. Everything about that
+creature - spawn, waypoints, casts, values, loot, swings - takes the same value.
+
+NULL (65535 in the two merged tables, whose key cannot hold NULL) means the sniff never said: it
+started inside the instance, or the build's handler does not read the field, which is every
+build before 4.3.4. Rows ingested before collector versions went up for this are NULL as well.
 
 ## 2. Script-derived — rebuildable, and dropped by their own script
 

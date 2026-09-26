@@ -22,6 +22,7 @@ namespace WowPacketParser.Store.Objects
         public string Guid;
         public uint Entry;
         public uint Map;
+        public uint? Difficulty;
 
         /// <summary>Groups the points that arrived in one packet; ordered within the sniff.</summary>
         public int SegmentId;

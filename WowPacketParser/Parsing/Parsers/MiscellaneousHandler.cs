@@ -714,7 +714,7 @@ namespace WowPacketParser.Parsing.Parsers
                 packet.ReadInt32("Restricted Account Max Money");
 
             packet.ReadTime("Last Weekly Reset");
-            packet.ReadInt32("Instance Difficulty ID");
+            MovementHandler.CurrentDifficultyID = (uint)packet.ReadInt32("Instance Difficulty ID");
         }
 
         [Parser(Opcode.CMSG_REQUEST_HONOR_STATS)]

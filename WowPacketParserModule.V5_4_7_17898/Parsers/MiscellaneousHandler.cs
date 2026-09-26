@@ -100,7 +100,7 @@ namespace WowPacketParserModule.V5_4_7_17898.Parsers
                 packet.ReadInt32("Int34");
 
             packet.ReadTime("Last Weekly Reset");
-            packet.ReadInt32("Instance Difficulty ID");
+            WowPacketParser.Parsing.Parsers.MovementHandler.CurrentDifficultyID = (uint)packet.ReadInt32("Instance Difficulty ID");
             packet.ReadBool("Is On Tournament Realm");
 
             if (bit14)

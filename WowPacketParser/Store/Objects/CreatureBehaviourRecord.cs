@@ -24,6 +24,7 @@ namespace WowPacketParser.Store.Objects
         public string Guid;
         public uint Entry;
         public uint Map;
+        public uint? Difficulty;
         public uint SpellId;
         public DateTime? StartedUtc;
 
@@ -78,6 +79,7 @@ namespace WowPacketParser.Store.Objects
         public string Guid;
         public uint Entry;
         public uint Map;
+        public uint? Difficulty;
         public uint ItemId1;
         public uint ItemId2;
         public uint ItemId3;
@@ -245,6 +247,7 @@ namespace WowPacketParser.Store.Objects
         public ulong SniffId;
         public uint Entry;
         public uint Map;
+        public uint? Difficulty;
         public string Field;
         public decimal Value;
         public int Guids;
@@ -322,6 +325,7 @@ namespace WowPacketParser.Store.Objects
         public string Guid;
         public uint Entry;
         public uint Map;
+        public uint? Difficulty;
         public DateTime? AggroUtc;
     }
 }

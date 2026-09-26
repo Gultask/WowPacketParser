@@ -100,7 +100,7 @@ namespace WowPacketParserModule.V5_4_2_17658.Parsers
         public static void HandleWorldServerInfo(Packet packet)
         {
             packet.ReadTime("Last Weekly Reset");
-            packet.ReadInt32("Instance Difficulty ID");
+            WowPacketParser.Parsing.Parsers.MovementHandler.CurrentDifficultyID = (uint)packet.ReadInt32("Instance Difficulty ID");
             packet.ReadByte("Byte18");
 
             var bit30 = packet.ReadBit();

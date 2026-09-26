@@ -24,6 +24,7 @@ namespace WowPacketParser.SQL
 CREATE TABLE IF NOT EXISTS `creature_value` (
   `entry`           INT UNSIGNED    NOT NULL,
   `map`             INT UNSIGNED    NOT NULL,
+  `difficulty`      SMALLINT UNSIGNED NOT NULL DEFAULT 65535 COMMENT 'DifficultyID of the stay the creature was created in; 65535 when the sniff never said, since a key cannot hold NULL',
   `branch`          VARCHAR(16)     NOT NULL,
   `field`           VARCHAR(24)     NOT NULL,
   `value`           DECIMAL(20,6)   NOT NULL COMMENT 'decimal so reaches, radii and speeds land exactly alongside the integer fields; unit_flags without the in-combat bit',
@@ -34,7 +35,7 @@ CREATE TABLE IF NOT EXISTS `creature_value` (
   `observations`    BIGINT UNSIGNED NOT NULL,
   `first_build`     INT             NOT NULL,
   `last_build`      INT             NOT NULL,
-  PRIMARY KEY (`entry`, `map`, `branch`, `field`, `value`),
+  PRIMARY KEY (`entry`, `map`, `difficulty`, `branch`, `field`, `value`),
   KEY `ix_cvalue_field` (`field`, `value`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   COMMENT='What each entry was seen carrying, over the whole corpus. Counted by distinct guid within a sniff, because one creature standing in view resends its fields on every update block. Resistances are PRIVATE|OWNER|SPECIAL_INFO, so their absence is not zero.';";
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS `creature_value` (
 CREATE TABLE IF NOT EXISTS `creature_equip` (
   `entry`       INT UNSIGNED NOT NULL,
   `map`         INT UNSIGNED NOT NULL,
+  `difficulty`  SMALLINT UNSIGNED NOT NULL DEFAULT 65535 COMMENT 'DifficultyID of the stay the creature was created in; 65535 when the sniff never said, since a key cannot hold NULL',
   `branch`      VARCHAR(16)  NOT NULL,
   `item_id1`    INT UNSIGNED NOT NULL,
   `item_id2`    INT UNSIGNED NOT NULL,
@@ -51,7 +53,7 @@ CREATE TABLE IF NOT EXISTS `creature_equip` (
   `guids`       INT UNSIGNED NOT NULL COMMENT 'creature sightings holding this set, summed over sniffs',
   `first_build` INT          NOT NULL,
   `last_build`  INT          NOT NULL,
-  PRIMARY KEY (`entry`, `map`, `branch`, `item_id1`, `item_id2`, `item_id3`)
+  PRIMARY KEY (`entry`, `map`, `difficulty`, `branch`, `item_id1`, `item_id2`, `item_id3`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   COMMENT='Virtual items a creature was drawn holding: main hand, off hand, ranged.';";
 
@@ -209,6 +211,12 @@ CREATE TABLE IF NOT EXISTS `quest_poi_point` (
   COMMENT='The polygon points of each quest_poi blob.';";
 
         /// <summary>
+        /// What a merged table keys an unknown difficulty as. Per-sniff tables say NULL; a primary
+        /// key cannot, and a NULL there would stop the rows it should merge from ever meeting.
+        /// </summary>
+        public const ushort UnknownDifficulty = 65535;
+
+        /// <summary>
         /// MD5 of the values, for tables whose rows are too wide to key on the values themselves.
         /// </summary>
         public static string Variant(params object[] values)
@@ -337,29 +345,31 @@ CREATE TABLE IF NOT EXISTS `quest_poi_point` (
         {
             var rows = new List<object[]>(values.Count);
             foreach (var v in values)
-                rows.Add(new object[] { v.Entry, v.Map, v.Field, v.Value, v.Guids, v.OnCreateGuids, v.ChangedGuids, v.Observations });
+                rows.Add(new object[] { v.Entry, v.Map, v.Difficulty ?? UnknownDifficulty, v.Field, v.Value, v.Guids, v.OnCreateGuids,
+                                        v.ChangedGuids, v.Observations });
 
             return SaveMergedRows("creature_value", sniffId, CollectorVersion.CreatureValue,
-                                  new[] { "entry", "map", "field", "value", "guids", "on_create_guids", "changed_guids", "observations" },
-                                  rows, sumFrom: 4, batchSize: 1000);
+                                  new[] { "entry", "map", "difficulty", "field", "value", "guids", "on_create_guids", "changed_guids", "observations" },
+                                  rows, sumFrom: 5, batchSize: 1000);
         }
 
         public static int SaveCreatureEquipment(ulong sniffId, IReadOnlyList<CreatureEquipRecord> equip)
         {
             // One row per guid comes in; one per set goes out, counting the guids that held it.
-            var sets = new Dictionary<(uint, uint, uint, uint, uint), int>();
+            var sets = new Dictionary<(uint, uint, ushort, uint, uint, uint), int>();
             foreach (var e in equip)
             {
-                var key = (e.Entry, e.Map, e.ItemId1, e.ItemId2, e.ItemId3);
+                var key = (e.Entry, e.Map, (ushort)(e.Difficulty ?? UnknownDifficulty), e.ItemId1, e.ItemId2, e.ItemId3);
                 sets[key] = sets.GetValueOrDefault(key) + 1;
             }
 
             var rows = new List<object[]>(sets.Count);
             foreach (var pair in sets)
-                rows.Add(new object[] { pair.Key.Item1, pair.Key.Item2, pair.Key.Item3, pair.Key.Item4, pair.Key.Item5, pair.Value });
+                rows.Add(new object[] { pair.Key.Item1, pair.Key.Item2, pair.Key.Item3, pair.Key.Item4, pair.Key.Item5, pair.Key.Item6,
+                                        pair.Value });
 
             return SaveMergedRows("creature_equip", sniffId, CollectorVersion.CreatureEquip,
-                                  new[] { "entry", "map", "item_id1", "item_id2", "item_id3", "guids" }, rows, sumFrom: 5);
+                                  new[] { "entry", "map", "difficulty", "item_id1", "item_id2", "item_id3", "guids" }, rows, sumFrom: 6);
         }
 
         public static int SaveCreatureQuestItems(ulong sniffId, IReadOnlyList<CreatureQuestItemRecord> items)

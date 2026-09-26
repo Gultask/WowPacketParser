@@ -26,6 +26,7 @@ namespace WowPacketParser.Store.Objects
         public string OwnerType;
         public int? OwnerLevel;
         public uint? Map;
+        public uint? Difficulty;
 
         public int AcquireReason;
         public string AcquireReasonName;

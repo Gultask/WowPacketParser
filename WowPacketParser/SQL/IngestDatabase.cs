@@ -79,7 +79,7 @@ namespace WowPacketParser.SQL
             foreach (var ddl in new[] { SniffTableDdl, GameObjectSpawnTableDdl, CreatureSpawnTableDdl,
                                         CreatureWaypointTableDdl, LootInstanceTableDdl,
                                         LootInstanceItemTableDdl, MapValidityTableDdl, MapValiditySeed,
-                                        SniffCoverageTableDdl, SniffMapTableDdl,
+                                        SniffCoverageTableDdl, SniffMapTableDdl, SniffMapVisitTableDdl,
                                         CreatureMovementTableDdl, CreatureSpellCastTableDdl,
                                         SpellTargetTableDdl, SpellDestinationTableDdl,
                                         CreatureEquipTableDdl,
@@ -113,7 +113,60 @@ namespace WowPacketParser.SQL
             EnsureColumn("sniff", "file_crc32",
                          "CHAR(8) NULL COMMENT 'CRC-32 as 7-Zip lists it, so an archive can be matched against this table without unpacking it' AFTER `file_size`");
 
+            // Rows from before difficulty was read keep NULL, or 65535 in the merged tables: unknown,
+            // which is what they are. The merged tables also need it in their key, or a heroic and
+            // a normal value of one entry would keep merging into the same row.
+            EnsureColumn("gameobject_spawn", "difficulty", DifficultyColumn("object"));
+            EnsureColumn("creature_spawn", "difficulty", DifficultyColumn("creature"));
+            EnsureColumn("creature_waypoint", "difficulty", DifficultyColumn("creature"));
+            EnsureColumn("loot_instance", "difficulty", DifficultyColumn("owner"));
+            EnsureColumn("creature_movement", "difficulty", DifficultyColumn("creature"));
+            EnsureColumn("creature_spell_cast", "difficulty", DifficultyColumn("creature"));
+            EnsureColumn("creature_aggro", "difficulty", DifficultyColumn("creature"));
+            EnsureColumn("creature_melee", "difficulty", DifficultyColumn("creature"));
+            EnsureColumn("creature_armor", "difficulty", DifficultyColumn("creature"));
+            EnsureColumn("creature_xp", "difficulty", DifficultyColumn("creature"));
+            EnsureColumn("creature_stats", "difficulty", DifficultyColumn("creature"));
+            EnsureColumn("creature_value", "difficulty", MergedDifficultyColumn);
+            EnsureColumn("creature_equip", "difficulty", MergedDifficultyColumn);
+            EnsurePrimaryKey("creature_value", "entry", "map", "difficulty", "branch", "field", "value");
+            EnsurePrimaryKey("creature_equip", "entry", "map", "difficulty", "branch", "item_id1", "item_id2", "item_id3");
+
             _schemaChecked = true;
+        }
+
+        private static string DifficultyColumn(string whose) =>
+            $"SMALLINT UNSIGNED NULL COMMENT 'DifficultyID of the stay the {whose} was created in; NULL when the sniff never said' AFTER `map`";
+
+        private const string MergedDifficultyColumn =
+            "SMALLINT UNSIGNED NOT NULL DEFAULT 65535 COMMENT 'DifficultyID of the stay the creature was created in; " +
+            "65535 when the sniff never said, since a key cannot hold NULL' AFTER `map`";
+
+        /// <summary>
+        /// Rebuilds a table's primary key when it is not the one given. Does nothing otherwise.
+        /// A merged table whose key has gained a column would otherwise go on merging the rows
+        /// that column is there to keep apart.
+        /// </summary>
+        [SuppressMessage("Microsoft.Security", "CA2100", Justification = "Table and column names are compile time constants; the lookup uses parameters.")]
+        private static void EnsurePrimaryKey(string table, params string[] columns)
+        {
+            using (var cmd = _conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR ',') " +
+                                  "FROM information_schema.statistics " +
+                                  "WHERE table_schema = DATABASE() AND table_name = @t AND index_name = 'PRIMARY';";
+                cmd.Parameters.AddWithValue("@t", table);
+                var current = Convert.ToString(cmd.ExecuteScalar());
+                if (string.Equals(current, string.Join(",", columns), StringComparison.OrdinalIgnoreCase))
+                    return;
+            }
+
+            using (var cmd = _conn.CreateCommand())
+            {
+                cmd.CommandTimeout = 0;
+                cmd.CommandText = $"ALTER TABLE `{table}` DROP PRIMARY KEY, ADD PRIMARY KEY (`{string.Join("`, `", columns)}`);";
+                cmd.ExecuteNonQuery();
+            }
         }
 
         /// <summary>Adds a column to an existing table if it is not there yet. Does nothing otherwise.</summary>
@@ -247,6 +300,7 @@ CREATE TABLE IF NOT EXISTS `creature_aggro` (
   `guid`      VARCHAR(40)     NOT NULL,
   `entry`     INT UNSIGNED    NOT NULL,
   `map`       INT UNSIGNED    NOT NULL,
+  `difficulty` SMALLINT UNSIGNED NULL COMMENT 'DifficultyID of the stay the creature was created in; NULL when the sniff never said',
   `aggro_utc` DATETIME(3)     NOT NULL,
   PRIMARY KEY (`sniff_id`, `guid`, `aggro_utc`),
   KEY `ix_caggro_entry` (`entry`, `aggro_utc`),
@@ -295,6 +349,7 @@ CREATE TABLE IF NOT EXISTS `gameobject_spawn` (
   `guid`           VARCHAR(40)     NOT NULL,
   `entry`          INT UNSIGNED    NOT NULL,
   `map`            INT UNSIGNED    NOT NULL,
+  `difficulty`     SMALLINT UNSIGNED NULL COMMENT 'DifficultyID of the stay the object was created in; NULL when the sniff never said',
   `area_id`        INT             NULL,
   `zone_id`        INT             NULL,
   `position_x`     FLOAT           NOT NULL,
@@ -325,6 +380,7 @@ CREATE TABLE IF NOT EXISTS `creature_spawn` (
   `guid`           VARCHAR(40)     NOT NULL,
   `entry`          INT UNSIGNED    NOT NULL,
   `map`            INT UNSIGNED    NOT NULL,
+  `difficulty`     SMALLINT UNSIGNED NULL COMMENT 'DifficultyID of the stay the creature was created in; NULL when the sniff never said',
   `area_id`        INT             NULL,
   `zone_id`        INT             NULL,
   `position_x`     FLOAT           NOT NULL,
@@ -352,6 +408,7 @@ CREATE TABLE IF NOT EXISTS `creature_waypoint` (
   `guid`            VARCHAR(40)     NOT NULL,
   `entry`           INT UNSIGNED    NOT NULL,
   `map`             INT UNSIGNED    NOT NULL,
+  `difficulty`      SMALLINT UNSIGNED NULL COMMENT 'DifficultyID of the stay the creature was created in; NULL when the sniff never said',
   `segment_id`      INT             NOT NULL COMMENT 'points sharing this arrived in one packet',
   `point_index`     INT             NOT NULL,
   `position_x`      FLOAT           NOT NULL,
@@ -384,6 +441,7 @@ CREATE TABLE IF NOT EXISTS `loot_instance` (
   `owner_type`      VARCHAR(16)     NULL,
   `owner_level`     INT             NULL,
   `map`             INT UNSIGNED    NULL,
+  `difficulty`      SMALLINT UNSIGNED NULL COMMENT 'DifficultyID of the stay the owner was created in; NULL when unknown',
   `acquire_reason`  TINYINT         NOT NULL,
   `acquire_name`    VARCHAR(32)     NULL,
   `loot_method`     TINYINT         NOT NULL,
@@ -421,6 +479,7 @@ CREATE TABLE IF NOT EXISTS `creature_movement` (
   `guid`                 VARCHAR(40)     NOT NULL,
   `entry`                INT UNSIGNED    NOT NULL,
   `map`                  INT UNSIGNED    NOT NULL,
+  `difficulty`           SMALLINT UNSIGNED NULL COMMENT 'DifficultyID of the stay the creature was created in; NULL when the sniff never said',
   `points`               INT             NOT NULL,
   `segments`             INT             NOT NULL,
   `multi_point_segments` INT             NOT NULL COMMENT 'authored splines; the rest are single random destinations',
@@ -627,6 +686,23 @@ CREATE TABLE IF NOT EXISTS `sniff_map` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   COMMENT='Which maps a sniff touched and how much it yielded on each, so a later run can be scoped by map without opening the files again.';";
 
+        private const string SniffMapVisitTableDdl = @"
+CREATE TABLE IF NOT EXISTS `sniff_map_visit` (
+  `sniff_id`     BIGINT UNSIGNED   NOT NULL,
+  `visit_index`  INT               NOT NULL COMMENT 'order within the sniff, from 0',
+  `started_by`   VARCHAR(20)       NOT NULL COMMENT 'login, new_world, difficulty_change, or sniff_start for what came before any of them',
+  `map`          INT UNSIGNED      NULL,
+  `difficulty`   SMALLINT UNSIGNED NULL COMMENT 'DifficultyID of SMSG_WORLD_SERVER_INFO: the instance the client is in, not the one it has selected. NULL when none arrived',
+  `first_packet` INT               NOT NULL,
+  `first_utc`    DATETIME(3)       NULL,
+  `last_utc`     DATETIME(3)       NULL,
+  `packets`      INT               NOT NULL,
+  PRIMARY KEY (`sniff_id`, `visit_index`),
+  KEY `ix_visit_map` (`map`, `difficulty`),
+  CONSTRAINT `fk_visit_sniff` FOREIGN KEY (`sniff_id`) REFERENCES `sniff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Each stay on a map, world change to world change, and the difficulty it was in. Every row elsewhere with a difficulty took it from here; this is also the denominator - a heroic visit to a map that never showed a creature.';";
+
         private const string SniffUpsertSql = @"
 INSERT INTO `sniff` (file_hash, file_name, file_size, file_crc32, sniffer, sniffer_id, sniffer_version, pkt_version,
                      client_build, client_version, client_locale, branch,
@@ -786,7 +862,7 @@ ON DUPLICATE KEY UPDATE
         }
 
         private const string GameObjectSpawnColumns =
-            "guid, entry, map, area_id, zone_id, position_x, position_y, position_z, orientation, " +
+            "guid, entry, map, difficulty, area_id, zone_id, position_x, position_y, position_z, orientation, " +
             "rotation0, rotation1, rotation2, rotation3, create_type, phase_mask, phases, first_seen_utc";
 
         public static int SaveGameObjectSpawns(ulong sniffId, IReadOnlyList<GameObjectSpawnRecord> spawns)
@@ -796,7 +872,7 @@ ON DUPLICATE KEY UPDATE
             {
                 rows.Add(new object[]
                 {
-                    go.Guid, go.Entry, go.Map, go.AreaId, go.ZoneId,
+                    go.Guid, go.Entry, go.Map, go.Difficulty, go.AreaId, go.ZoneId,
                     go.PositionX, go.PositionY, go.PositionZ, go.Orientation,
                     go.Rotation0, go.Rotation1, go.Rotation2, go.Rotation3,
                     go.CreateType, go.PhaseMask, go.Phases, go.FirstSeenUtc
@@ -807,7 +883,7 @@ ON DUPLICATE KEY UPDATE
         }
 
         private const string CreatureSpawnColumns =
-            "guid, entry, map, area_id, zone_id, position_x, position_y, position_z, orientation, " +
+            "guid, entry, map, difficulty, area_id, zone_id, position_x, position_y, position_z, orientation, " +
             "create_type, phase_mask, phases, health, first_seen_utc";
 
         public static int SaveCreatureSpawns(ulong sniffId, IReadOnlyList<CreatureSpawnRecord> spawns)
@@ -817,7 +893,7 @@ ON DUPLICATE KEY UPDATE
             {
                 rows.Add(new object[]
                 {
-                    c.Guid, c.Entry, c.Map, c.AreaId, c.ZoneId,
+                    c.Guid, c.Entry, c.Map, c.Difficulty, c.AreaId, c.ZoneId,
                     c.PositionX, c.PositionY, c.PositionZ, c.Orientation,
                     c.CreateType, c.PhaseMask, c.Phases, c.Health, c.FirstSeenUtc
                 });
@@ -827,7 +903,7 @@ ON DUPLICATE KEY UPDATE
         }
 
         private const string CreatureWaypointColumns =
-            "guid, entry, map, segment_id, point_index, position_x, position_y, position_z, " +
+            "guid, entry, map, difficulty, segment_id, point_index, position_x, position_y, position_z, " +
             "orientation, segment_points, spline_flags, creation_spline, move_time_ms, seen_utc";
 
         // Waypoints run to far more rows per sniff than spawns do, so they go in bigger batches.
@@ -838,7 +914,7 @@ ON DUPLICATE KEY UPDATE
             {
                 rows.Add(new object[]
                 {
-                    w.Guid, w.Entry, w.Map, w.SegmentId, w.PointIndex,
+                    w.Guid, w.Entry, w.Map, w.Difficulty, w.SegmentId, w.PointIndex,
                     w.PositionX, w.PositionY, w.PositionZ, w.Orientation, w.SegmentPoints,
                     w.SplineFlags, w.CreationSpline ? 1 : 0, w.MoveTimeMs, w.SeenUtc
                 });
@@ -848,7 +924,7 @@ ON DUPLICATE KEY UPDATE
         }
 
         private const string LootInstanceColumns =
-            "loot_index, owner_guid, owner_entry, owner_type, owner_level, map, acquire_reason, " +
+            "loot_index, owner_guid, owner_entry, owner_type, owner_level, map, difficulty, acquire_reason, " +
             "acquire_name, loot_method, loot_method_name, threshold, coins, item_count, seen_utc";
 
         private const string LootInstanceItemColumns =
@@ -868,7 +944,7 @@ ON DUPLICATE KEY UPDATE
                 var loot = loots[i];
                 parents.Add(new object[]
                 {
-                    i, loot.OwnerGuid, loot.OwnerEntry, loot.OwnerType, loot.OwnerLevel, loot.Map,
+                    i, loot.OwnerGuid, loot.OwnerEntry, loot.OwnerType, loot.OwnerLevel, loot.Map, loot.Difficulty,
                     loot.AcquireReason, loot.AcquireReasonName, loot.LootMethod, loot.LootMethodName,
                     loot.Threshold, loot.Coins, loot.ItemCount, loot.SeenUtc
                 });
@@ -890,7 +966,7 @@ ON DUPLICATE KEY UPDATE
         }
 
         private const string CreatureMovementColumns =
-            "guid, entry, map, points, segments, multi_point_segments, transitions, pauses, " +
+            "guid, entry, map, difficulty, points, segments, multi_point_segments, transitions, pauses, " +
             "median_x, median_y, median_z, radius, radius_robust, first_seen_utc, last_seen_utc";
 
         public static int SaveCreatureMovement(ulong sniffId, IReadOnlyList<CreatureMovementRecord> moves)
@@ -900,7 +976,7 @@ ON DUPLICATE KEY UPDATE
             {
                 rows.Add(new object[]
                 {
-                    m.Guid, m.Entry, m.Map, m.Points, m.Segments, m.MultiPointSegments,
+                    m.Guid, m.Entry, m.Map, m.Difficulty, m.Points, m.Segments, m.MultiPointSegments,
                     m.Transitions, m.Pauses, m.MedianX, m.MedianY, m.MedianZ,
                     m.Radius, m.RadiusRobust, m.FirstSeenUtc, m.LastSeenUtc
                 });
@@ -933,6 +1009,7 @@ CREATE TABLE IF NOT EXISTS `creature_spell_cast` (
   `guid`        VARCHAR(40)     NOT NULL,
   `entry`       INT UNSIGNED    NOT NULL,
   `map`         INT UNSIGNED    NOT NULL,
+  `difficulty`  SMALLINT UNSIGNED NULL COMMENT 'DifficultyID of the stay the creature was created in; NULL when the sniff never said',
   `spell_id`    INT UNSIGNED    NOT NULL,
   `started_utc` DATETIME(3)     NULL,
   `completed`   TINYINT(1)      NOT NULL COMMENT 'a matching SMSG_SPELL_GO arrived',
@@ -1045,13 +1122,13 @@ CREATE TABLE IF NOT EXISTS `areatrigger_teleport` (
   COMMENT='A client area trigger paired with the world change it produced. The teleport is never in one packet, so the pairing is by adjacency in time and delay_ms is how much to trust it.';";
 
         private const string CreatureSpellCastColumns =
-            "guid, entry, map, spell_id, started_utc, completed";
+            "guid, entry, map, difficulty, spell_id, started_utc, completed";
 
         public static int SaveCreatureSpellCasts(ulong sniffId, IReadOnlyList<CreatureSpellCastRecord> casts)
         {
             var rows = new List<object[]>(casts.Count);
             foreach (var c in casts)
-                rows.Add(new object[] { c.Guid, c.Entry, c.Map, c.SpellId, c.StartedUtc, c.Completed ? 1 : 0 });
+                rows.Add(new object[] { c.Guid, c.Entry, c.Map, c.Difficulty, c.SpellId, c.StartedUtc, c.Completed ? 1 : 0 });
 
             return SaveRows("creature_spell_cast", sniffId, CreatureSpellCastColumns, rows, 1000);
         }
@@ -1171,13 +1248,13 @@ CREATE TABLE IF NOT EXISTS `areatrigger_teleport` (
             return SaveRows("creature_template_model", sniffId, CreatureTemplateModelColumns, rows);
         }
 
-        private const string CreatureAggroColumns = "guid, entry, map, aggro_utc";
+        private const string CreatureAggroColumns = "guid, entry, map, difficulty, aggro_utc";
 
         public static int SaveCreatureAggro(ulong sniffId, IReadOnlyList<CreatureAggroRecord> aggro)
         {
             var rows = new List<object[]>(aggro.Count);
             foreach (var a in aggro)
-                rows.Add(new object[] { a.Guid, a.Entry, a.Map, a.AggroUtc });
+                rows.Add(new object[] { a.Guid, a.Entry, a.Map, a.Difficulty, a.AggroUtc });
 
             return SaveRows("creature_aggro", sniffId, CreatureAggroColumns, rows, 1000);
         }
@@ -1259,6 +1336,19 @@ CREATE TABLE IF NOT EXISTS `areatrigger_teleport` (
                                         m.LootInstances, m.CreatureSpells, m.Packets, m.GatedPackets });
 
             return SaveRows("sniff_map", sniffId, SniffMapColumns, rows);
+        }
+
+        private const string SniffMapVisitColumns =
+            "visit_index, started_by, map, difficulty, first_packet, first_utc, last_utc, packets";
+
+        public static int SaveMapVisits(ulong sniffId, IReadOnlyList<MapVisit> visits)
+        {
+            var rows = new List<object[]>(visits.Count);
+            foreach (var v in visits)
+                rows.Add(new object[] { v.Index, v.StartedBy, v.Map, v.Difficulty,
+                                        v.FirstPacket == int.MinValue ? 0 : v.FirstPacket, v.FirstUtc, v.LastUtc, v.Packets });
+
+            return SaveRows("sniff_map_visit", sniffId, SniffMapVisitColumns, rows);
         }
     }
 }

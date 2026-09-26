@@ -80,16 +80,17 @@
         public const string GossipPoi = "gossip_poi";
         public const string QuestPoi = "quest_poi";
         public const string QuestPoiPoint = "quest_poi_point";
+        public const string MapVisit = "map_visit";
 
-        public const int CreatureSpawnVersion = 3;   // 2 added emote/stand/sheathe state, 3 added health
-        public const int GameObjectSpawnVersion = 2;   // 2 added the static rotation quaternion
-        public const int CreatureWaypointVersion = 5;   // 2 added segment point counts, 3 gates owned creatures, 4 every create-block spline in a packet, 5 drops only in-combat segments
-        public const int LootVersion = 1;
-        public const int CreatureMovementVersion = 2;   // 2 sees update packets that carried a create-block spline
-        public const int CreatureSpellVersion = 2;   // 2 reads SMSG_SPELL_START on TBC Anniversary
+        public const int CreatureSpawnVersion = 4;   // 2 added emote/stand/sheathe state, 3 added health, 4 added difficulty
+        public const int GameObjectSpawnVersion = 3;   // 2 added the static rotation quaternion, 3 added difficulty
+        public const int CreatureWaypointVersion = 6;   // 2 added segment point counts, 3 gates owned creatures, 4 every create-block spline in a packet, 5 drops only in-combat segments, 6 added difficulty
+        public const int LootVersion = 2;   // 2 added difficulty
+        public const int CreatureMovementVersion = 3;   // 2 sees update packets that carried a create-block spline, 3 added difficulty
+        public const int CreatureSpellVersion = 3;   // 2 reads SMSG_SPELL_START on TBC Anniversary, 3 added difficulty
         public const int SpellTargetVersion = 2;   // 2 added player hits and self_hits
         public const int SpellDestinationVersion = 1;
-        public const int CreatureEquipVersion = 2;   // 2 merged across sniffs
+        public const int CreatureEquipVersion = 3;   // 2 merged across sniffs, 3 difficulty in the key
         public const int GossipVersion = 2; // 2 added the option's own id next to the order index
         public const int AreaTriggerTeleportVersion = 1;
         public const int NpcVendorVersion = 1;
@@ -97,12 +98,12 @@
         public const int CreatureTemplateSpellVersion = 1;
         public const int CreatureQuestItemVersion = 2;   // 2 merged across sniffs
         public const int CreatureGossipVersion = 1;
-        public const int CreatureValueVersion = 3;   // 2 sees update packets that carried a create-block spline, 3 merged across sniffs without the in-combat bit
-        public const int CreatureAggroVersion = 1;
-        public const int CreatureMeleeVersion = 1;
-        public const int CreatureArmorVersion = 1;
-        public const int CreatureXpVersion = 1;
-        public const int CreatureStatsVersion = 1;
+        public const int CreatureValueVersion = 4;   // 2 sees update packets that carried a create-block spline, 3 merged across sniffs without the in-combat bit, 4 difficulty in the key
+        public const int CreatureAggroVersion = 2;   // 2 added difficulty
+        public const int CreatureMeleeVersion = 2;   // 2 added difficulty
+        public const int CreatureArmorVersion = 2;   // 2 added difficulty
+        public const int CreatureXpVersion = 2;   // 2 added difficulty
+        public const int CreatureStatsVersion = 2;   // 2 added difficulty
         public const int GameObjectTemplateVersion = 1;
         public const int GameObjectQuestItemVersion = 1;
         public const int TrainerVersion = 1;
@@ -112,6 +113,7 @@
         public const int QuestPoiPointVersion = 1;
         public const int CreatureTemplateVersion = 1;
         public const int CreatureTemplateModelVersion = 1;
+        public const int MapVisitVersion = 1;
 
         public const string StatusOk = "ok";
         public const string StatusEmpty = "empty";

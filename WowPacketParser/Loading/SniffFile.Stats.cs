@@ -114,6 +114,7 @@ namespace WowPacketParser.Loading
                 UnitType = unitType,
                 Relation = s.Relation,
                 Map = s.Map,
+                Visit = s.Visit,
                 Level = s.Level,
                 Class = s.Class,
                 Auras = s.AuraKey,
@@ -143,7 +144,7 @@ namespace WowPacketParser.Loading
                 ResistanceNeg = Join(sheet.ResistanceNeg)
             };
 
-            var id = row.Key();
+            var id = row.Key() + "|" + s.Visit?.Index;
             if (_statSheets.TryGetValue(id, out var existing))
                 row = existing;
             else
@@ -157,7 +158,14 @@ namespace WowPacketParser.Loading
         {
             foreach (var row in _statSheets.Values)
                 row.SniffId = sniffId;
-            return _statSheets.Values.ToList();
+
+            return ByDifficulty(_statSheets.Values, r => r.Visit, r => r.Map, (r, d) => r.Difficulty = d,
+                r => r.Key() + "|" + r.Difficulty,
+                (held, r) =>
+                {
+                    held.Guids.UnionWith(r.Guids);
+                    held.Updates += r.Updates;
+                });
         }
     }
 }

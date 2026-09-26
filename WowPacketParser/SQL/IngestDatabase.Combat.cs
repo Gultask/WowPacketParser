@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS `creature_melee` (
   `sniff_id`        BIGINT UNSIGNED   NOT NULL,
   `entry`           INT UNSIGNED      NOT NULL,
   `map`             INT UNSIGNED      NOT NULL,
+  `difficulty`      SMALLINT UNSIGNED NULL COMMENT 'DifficultyID of the stay the creature was created in; NULL when the sniff never said',
   `owner`           VARCHAR(8)        NOT NULL COMMENT 'player, pet, creature or spell when summoned, charmed or created; empty for a creature of its own',
   `level`           SMALLINT UNSIGNED NOT NULL COMMENT 'at the swing; 0 if never seen',
   `attack_time`     INT UNSIGNED      NOT NULL COMMENT 'this hand''s attack time at the swing, ms, hasted or slowed as sent; 0 if never seen',
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS `creature_armor` (
   `sniff_id`        BIGINT UNSIGNED   NOT NULL,
   `entry`           INT UNSIGNED      NOT NULL COMMENT 'the victim; 0 for a player',
   `map`             INT UNSIGNED      NOT NULL,
+  `difficulty`      SMALLINT UNSIGNED NULL COMMENT 'DifficultyID of the stay the creature was created in; NULL when the sniff never said',
   `level`           SMALLINT UNSIGNED NOT NULL,
   `armor`           INT               NOT NULL COMMENT 'as sent at the swing; -1 unknown - only sent for the player and its pets',
   `auras`           VARCHAR(512)      NOT NULL COMMENT 'spell ids on the victim at the swing: Sunder, Faerie Fire and the like live here',
@@ -64,7 +66,7 @@ CREATE TABLE IF NOT EXISTS `creature_armor` (
   COMMENT='Melee swings with only armor between OriginalDamage and Damage, per victim entry. For a creature victim the reduction gives its armor: a creature attacker has no armor penetration, a player''s only lowers the reading. For a player victim armor is known and the formula can be checked.';";
 
         private const string CreatureMeleeColumns =
-            "entry, map, owner, level, attack_time, auras, victim_type, kind, school, offhand, melee_spell, guids, " +
+            "entry, map, difficulty, owner, level, attack_time, auras, victim_type, kind, school, offhand, melee_spell, guids, " +
             "swings, original_min, original_max, original_sum, originals, first_utc, last_utc";
 
         public static int SaveCreatureMelee(ulong sniffId, IReadOnlyList<CreatureMeleeRecord> melee)
@@ -74,7 +76,7 @@ CREATE TABLE IF NOT EXISTS `creature_armor` (
                 var landed = m.Originals.Count > 0;
                 return new object[]
                 {
-                    m.Entry, m.Map, m.Owner, m.Level, m.AttackTime, m.Auras, m.VictimType, m.Kind, m.School,
+                    m.Entry, m.Map, m.Difficulty, m.Owner, m.Level, m.AttackTime, m.Auras, m.VictimType, m.Kind, m.School,
                     m.Offhand, m.MeleeSpell, m.Guids.Count, m.Swings,
                     landed ? m.OriginalMin : null, landed ? m.OriginalMax : null, m.OriginalSum,
                     landed ? "[" + string.Join(",", m.Originals) + "]" : null, m.FirstUtc, m.LastUtc
@@ -85,14 +87,14 @@ CREATE TABLE IF NOT EXISTS `creature_armor` (
         }
 
         private const string CreatureArmorColumns =
-            "entry, map, level, armor, auras, attacker_type, attacker_level, victims, attackers, swings, " +
+            "entry, map, difficulty, level, armor, auras, attacker_type, attacker_level, victims, attackers, swings, " +
             "original_sum, damage_sum, debug_swings, debug_armor_reduction_sum";
 
         public static int SaveCreatureArmor(ulong sniffId, IReadOnlyList<CreatureArmorRecord> armor)
         {
             var rows = armor.Select(a => new object[]
             {
-                a.Entry, a.Map, a.Level, a.Armor, a.Auras, a.AttackerType, a.AttackerLevel, a.Victims.Count,
+                a.Entry, a.Map, a.Difficulty, a.Level, a.Armor, a.Auras, a.AttackerType, a.AttackerLevel, a.Victims.Count,
                 a.Attackers.Count, a.Swings, a.OriginalSum, a.DamageSum, a.DebugSwings, a.DebugArmorReductionSum
             }).ToList();
 
@@ -105,6 +107,7 @@ CREATE TABLE IF NOT EXISTS `creature_xp` (
   `sniff_id`        BIGINT UNSIGNED   NOT NULL,
   `entry`           INT UNSIGNED      NOT NULL,
   `map`             INT UNSIGNED      NOT NULL,
+  `difficulty`      SMALLINT UNSIGNED NULL COMMENT 'DifficultyID of the stay the creature was created in; NULL when the sniff never said',
   `zone`            INT UNSIGNED      NOT NULL COMMENT 'with map, decides the content bracket and so the base XP',
   `owner`           VARCHAR(8)        NOT NULL COMMENT 'as in creature_melee',
   `level`           SMALLINT UNSIGNED NOT NULL COMMENT 'the victim''s, at the kill',
@@ -123,14 +126,14 @@ CREATE TABLE IF NOT EXISTS `creature_xp` (
   COMMENT='Kill XP from SMSG_LOG_XP_GAIN with the levels that set it. Against the level formula the ratio is ExperienceModifier, doubled for elites.';";
 
         private const string CreatureXpColumns =
-            "entry, map, zone, owner, level, player_level, group_bonus, guids, kills, amount_min, amount_max, " +
+            "entry, map, difficulty, zone, owner, level, player_level, group_bonus, guids, kills, amount_min, amount_max, " +
             "amount_sum, original_sum";
 
         public static int SaveCreatureXp(ulong sniffId, IReadOnlyList<CreatureXpRecord> xp)
         {
             var rows = xp.Select(x => new object[]
             {
-                x.Entry, x.Map, x.Zone, x.Owner, x.Level, x.PlayerLevel, x.GroupBonus, x.Guids.Count, x.Kills,
+                x.Entry, x.Map, x.Difficulty, x.Zone, x.Owner, x.Level, x.PlayerLevel, x.GroupBonus, x.Guids.Count, x.Kills,
                 x.AmountMin, x.AmountMax, x.AmountSum, x.OriginalSum
             }).ToList();
 
@@ -145,6 +148,7 @@ CREATE TABLE IF NOT EXISTS `creature_stats` (
   `unit_type`           VARCHAR(8)        NOT NULL COMMENT 'creature, vehicle or pet, from the guid',
   `relation`            VARCHAR(8)        NOT NULL COMMENT 'charmed, summoned, created or demon, as last sent; empty if none was',
   `map`                 INT UNSIGNED      NOT NULL,
+  `difficulty`          SMALLINT UNSIGNED NULL COMMENT 'DifficultyID of the stay the creature was created in; NULL when the sniff never said',
   `level`               SMALLINT UNSIGNED NOT NULL,
   `class`               TINYINT UNSIGNED  NOT NULL COMMENT 'unit class as sent; 0 if never seen',
   `auras`               VARCHAR(512)      NOT NULL COMMENT 'spell ids on the unit when the sheet was sent, as in creature_melee',
@@ -181,7 +185,7 @@ CREATE TABLE IF NOT EXISTS `creature_stats` (
   COMMENT='The stat sheet the server sends a unit''s owner, charmer or rider: pets, guardians, vehicles and mind-controlled mobs. The damage range is the server''s own arithmetic, so it gives DamageModifier exactly; armor and resistances are sent as they are.';";
 
         private const string CreatureStatsColumns =
-            "entry, unit_type, relation, map, level, class, auras, max_health, base_health, base_mana, min_damage, " +
+            "entry, unit_type, relation, map, difficulty, level, class, auras, max_health, base_health, base_mana, min_damage, " +
             "max_damage, min_offhand_damage, max_offhand_damage, min_ranged_damage, max_ranged_damage, attack_power, " +
             "attack_power_pos, attack_power_neg, attack_power_mult, ranged_attack_power, attack_time, " +
             "offhand_attack_time, ranged_attack_time, armor, stats, stat_pos, stat_neg, resistances, resistance_pos, " +
@@ -191,7 +195,7 @@ CREATE TABLE IF NOT EXISTS `creature_stats` (
         {
             var rows = stats.Select(x => new object[]
             {
-                x.Entry, x.UnitType, x.Relation, x.Map, x.Level, x.Class, x.Auras, x.MaxHealth, x.BaseHealth,
+                x.Entry, x.UnitType, x.Relation, x.Map, x.Difficulty, x.Level, x.Class, x.Auras, x.MaxHealth, x.BaseHealth,
                 x.BaseMana, x.MinDamage, x.MaxDamage, x.MinOffHandDamage, x.MaxOffHandDamage, x.MinRangedDamage,
                 x.MaxRangedDamage, x.AttackPower, x.AttackPowerModPos, x.AttackPowerModNeg, x.AttackPowerMultiplier,
                 x.RangedAttackPower, x.AttackTime, x.OffHandAttackTime, x.RangedAttackTime, x.Armor, x.Stats,

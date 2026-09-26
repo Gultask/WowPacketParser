@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using WowPacketParser.Enums;
+using WowPacketParser.Misc;
 using WowPacketParser.Proto;
 using WowPacketParser.Store;
 using WowPacketParser.Store.Objects;
@@ -10,7 +11,7 @@ namespace WowPacketParser.Loading
 {
     public partial class SniffFile
     {
-        private readonly Dictionary<(uint, uint, uint, uint, uint, string, float), CreatureXpRecord> _xp = new();
+        private readonly Dictionary<(uint, uint, MapVisit, uint, uint, uint, string, float), CreatureXpRecord> _xp = new();
 
         /// <summary>
         /// The sniffer's own character: the one the XP packets are addressed to. CMSG_PLAYER_LOGIN
@@ -62,13 +63,14 @@ namespace WowPacketParser.Loading
             var v = StateOf(victim, gain.Victim);
             var playerLevel = Tracked(player).Level;
 
-            var id = (gain.Victim.Entry, v.Map, v.Zone, v.Level, playerLevel, v.Owner, gain.GroupBonus);
+            var id = (gain.Victim.Entry, v.Map, v.Visit, v.Zone, v.Level, playerLevel, v.Owner, gain.GroupBonus);
             if (!_xp.TryGetValue(id, out var row))
             {
                 _xp[id] = row = new CreatureXpRecord
                 {
                     Entry = id.Entry,
                     Map = v.Map,
+                    Visit = v.Visit,
                     Zone = v.Zone,
                     Level = v.Level,
                     PlayerLevel = playerLevel,
@@ -89,7 +91,18 @@ namespace WowPacketParser.Loading
         {
             foreach (var row in _xp.Values)
                 row.SniffId = sniffId;
-            return _xp.Values.ToList();
+
+            return ByDifficulty(_xp.Values, r => r.Visit, r => r.Map, (r, d) => r.Difficulty = d,
+                r => (r.Entry, r.Map, r.Difficulty, r.Zone, r.Level, r.PlayerLevel, r.Owner, r.GroupBonus),
+                (held, r) =>
+                {
+                    held.Guids.UnionWith(r.Guids);
+                    held.Kills += r.Kills;
+                    held.AmountMin = Math.Min(held.AmountMin, r.AmountMin);
+                    held.AmountMax = Math.Max(held.AmountMax, r.AmountMax);
+                    held.AmountSum += r.AmountSum;
+                    held.OriginalSum += r.OriginalSum;
+                });
         }
     }
 }

@@ -35,16 +35,19 @@ namespace WowPacketParser.Loading
             // Constant for the unit's life, so read from Storage once.
             public bool Resolved;
             public uint Map;
+            public MapVisit Visit;
             public uint Zone;
             public string Owner = "";
         }
 
         private readonly Dictionary<string, UnitState> _unitStates = new();
 
-        private readonly Dictionary<(uint, uint, string, uint, uint, string, string, string, uint, bool, int), CreatureMeleeRecord>
+        // Folded per stay rather than per difficulty: a stay's difficulty can arrive after the
+        // first swings in it are folded. ByDifficulty merges the stays once the file is read.
+        private readonly Dictionary<(uint, uint, MapVisit, string, uint, uint, string, string, string, uint, bool, int), CreatureMeleeRecord>
             _melee = new();
 
-        private readonly Dictionary<(uint, uint, uint, int, string, string, uint), CreatureArmorRecord> _armor = new();
+        private readonly Dictionary<(uint, uint, MapVisit, uint, int, string, string, uint), CreatureArmorRecord> _armor = new();
 
         private const uint HitMiss = 0x10;
         private const uint HitFullAbsorb = 0x20;
@@ -155,6 +158,7 @@ namespace WowPacketParser.Loading
             {
                 state.Resolved = true;
                 state.Map = obj.Map;
+                state.Visit = MapVisits.VisitAt(obj.PacketNumber);
                 state.Zone = (uint)Math.Max(obj.Zone, 0);
                 if (obj is Unit owned)
                     state.Owner = OwnerType(owned);
@@ -244,7 +248,7 @@ namespace WowPacketParser.Loading
             if (attackerType == "creature")
             {
                 var attackTime = offhand ? a.AttackTime1 : a.AttackTime0;
-                var id = (swing.Attacker.Entry, a.Map, a.Owner, a.Level, attackTime, a.AuraKey, UnitType(swing.Victim),
+                var id = (swing.Attacker.Entry, a.Map, a.Visit, a.Owner, a.Level, attackTime, a.AuraKey, UnitType(swing.Victim),
                           kind, school, offhand, swing.MeleeSpellId);
                 if (!_melee.TryGetValue(id, out var row))
                 {
@@ -252,11 +256,12 @@ namespace WowPacketParser.Loading
                     {
                         Entry = id.Entry,
                         Map = a.Map,
+                        Visit = a.Visit,
                         Owner = a.Owner,
                         Level = a.Level,
                         AttackTime = attackTime,
                         Auras = a.AuraKey,
-                        VictimType = id.Item7,
+                        VictimType = id.Item8,
                         Kind = kind,
                         School = school,
                         Offhand = offhand,
@@ -291,13 +296,14 @@ namespace WowPacketParser.Loading
                 school != 1)
                 return;
 
-            var armorId = (swing.Victim.Entry, v.Map, v.Level, v.Armor, v.AuraKey, attackerType, a.Level);
+            var armorId = (swing.Victim.Entry, v.Map, v.Visit, v.Level, v.Armor, v.AuraKey, attackerType, a.Level);
             if (!_armor.TryGetValue(armorId, out var armor))
             {
                 _armor[armorId] = armor = new CreatureArmorRecord
                 {
                     Entry = armorId.Entry,
                     Map = v.Map,
+                    Visit = v.Visit,
                     Level = v.Level,
                     Armor = v.Armor,
                     Auras = v.AuraKey,
@@ -318,18 +324,69 @@ namespace WowPacketParser.Loading
             }
         }
 
+        /// <summary>
+        /// Settles the difficulty of rows folded per stay, now that every stay's has been read,
+        /// and folds together the stays that turned out to share one - a death and a run back
+        /// is a new stay in the same instance.
+        /// </summary>
+        private static List<T> ByDifficulty<T>(IEnumerable<T> rows, Func<T, MapVisit> visit, Func<T, uint> map,
+                                               Action<T, uint?> setDifficulty, Func<T, object> key, Action<T, T> into)
+        {
+            var merged = new Dictionary<object, T>();
+            foreach (var row in rows)
+            {
+                setDifficulty(row, visit(row)?.DifficultyFor(map(row)));
+                var k = key(row);
+                if (merged.TryGetValue(k, out var held))
+                    into(held, row);
+                else
+                    merged[k] = row;
+            }
+
+            return merged.Values.ToList();
+        }
+
+        private static DateTime? Earlier(DateTime? a, DateTime? b) => a == null ? b : b == null ? a : a < b ? a : b;
+        private static DateTime? Later(DateTime? a, DateTime? b) => a == null ? b : b == null ? a : a > b ? a : b;
+
         private List<CreatureMeleeRecord> CollectCreatureMelee(ulong sniffId)
         {
             foreach (var row in _melee.Values)
                 row.SniffId = sniffId;
-            return _melee.Values.ToList();
+
+            return ByDifficulty(_melee.Values, r => r.Visit, r => r.Map, (r, d) => r.Difficulty = d,
+                r => (r.Entry, r.Map, r.Difficulty, r.Owner, r.Level, r.AttackTime, r.Auras, r.VictimType, r.Kind,
+                      r.School, r.Offhand, r.MeleeSpell),
+                (held, r) =>
+                {
+                    held.Guids.UnionWith(r.Guids);
+                    held.Swings += r.Swings;
+                    held.OriginalMin = Math.Min(held.OriginalMin, r.OriginalMin);
+                    held.OriginalMax = Math.Max(held.OriginalMax, r.OriginalMax);
+                    held.OriginalSum += r.OriginalSum;
+                    held.Originals.AddRange(r.Originals);
+                    held.FirstUtc = Earlier(held.FirstUtc, r.FirstUtc);
+                    held.LastUtc = Later(held.LastUtc, r.LastUtc);
+                });
         }
 
         private List<CreatureArmorRecord> CollectCreatureArmor(ulong sniffId)
         {
             foreach (var row in _armor.Values)
                 row.SniffId = sniffId;
-            return _armor.Values.ToList();
+
+            return ByDifficulty(_armor.Values, r => r.Visit, r => r.Map, (r, d) => r.Difficulty = d,
+                r => (r.Entry, r.Map, r.Difficulty, r.Level, r.Armor, r.Auras, r.AttackerType, r.AttackerLevel),
+                (held, r) =>
+                {
+                    held.Victims.UnionWith(r.Victims);
+                    held.Attackers.UnionWith(r.Attackers);
+                    held.Swings += r.Swings;
+                    held.OriginalSum += r.OriginalSum;
+                    held.DamageSum += r.DamageSum;
+                    held.DebugSwings += r.DebugSwings;
+                    held.DebugArmorReductionSum += r.DebugArmorReductionSum;
+                });
         }
     }
 }

@@ -131,7 +131,7 @@ namespace WowPacketParserModule.V5_4_0_17359.Parsers
         [Parser(Opcode.SMSG_WORLD_SERVER_INFO)]
         public static void HandleWorldServerInfo(Packet packet)
         {
-            packet.ReadInt32("Instance Difficulty ID");
+            WowPacketParser.Parsing.Parsers.MovementHandler.CurrentDifficultyID = (uint)packet.ReadInt32("Instance Difficulty ID");
             packet.ReadTime("Last Weekly Reset");
             packet.ReadByte("Byte18");
 

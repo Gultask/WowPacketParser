@@ -56,6 +56,20 @@ namespace WowPacketParser.Misc
             Opcode.CMSG_LOADING_SCREEN_NOTIFY
         };
 
+        private const uint NoMap = uint.MaxValue;
+
+        /// <summary>
+        /// What can bring an object into view. Seeing one ends the window in which a difficulty
+        /// sent ahead of a login is still taken to be the login's.
+        /// </summary>
+        private static readonly HashSet<Opcode> CreatesObjects = new HashSet<Opcode>
+        {
+            Opcode.SMSG_UPDATE_OBJECT,
+            Opcode.SMSG_COMPRESSED_UPDATE_OBJECT,
+            Opcode.SMSG_MULTIPLE_PACKETS,
+            Opcode.SMSG_COMPRESSED_MULTIPLE_PACKETS
+        };
+
         /// <summary>
         /// Opcodes that must never be gated, because their handler advances the per-connection
         /// zlib stream. Packet.Inflate keeps that stream across packets for builds from 4.3.0
@@ -196,6 +210,7 @@ namespace WowPacketParser.Misc
             GatedCount = 0;
             UnknownMapCount = 0;
             Census.Clear();
+            MapVisits.BeginSniff();
         }
 
         public static bool IsMapWanted(uint map)
@@ -227,14 +242,45 @@ namespace WowPacketParser.Misc
 
             if (MapDefining.Contains(opcode))
             {
+                // CurrentMapId is thread static and this is the reader's thread, which the last
+                // sniff also ran on. The 3.4.4, 4.4 and 5.5 loading screen handlers set no map, so
+                // without this they published the previous sniff's last map, and a batch judged the
+                // start of every sniff against it.
+                MovementHandler.CurrentMapId = NoMap;
                 Handler.Parse(packet);
                 parsedHere = true;
-                CurrentMap = MovementHandler.CurrentMapId;
+                uint? stated = MovementHandler.CurrentMapId != NoMap ? MovementHandler.CurrentMapId : null;
+                if (stated != null)
+                    CurrentMap = stated;
+                else
+                    MovementHandler.CurrentMapId = CurrentMap ?? 0;
+
+                if (opcode == Opcode.SMSG_NEW_WORLD || opcode == Opcode.SMSG_LOGIN_VERIFY_WORLD)
+                    MapVisits.Begin(packet, stated, opcode == Opcode.SMSG_NEW_WORLD ? "new_world" : "login");
                 Count(CurrentMap);
+                MapVisits.Count(packet, CurrentMap);
                 return true;
             }
 
+            // Parsed here for the same reason, whatever the gate: the stay it names began at the
+            // world change before it, and only file order says which one that was. Cleared first,
+            // because not every build's handler sets it and the last sniff's value would stand in.
+            if (opcode == Opcode.SMSG_WORLD_SERVER_INFO)
+            {
+                MovementHandler.CurrentDifficultyID = null;
+                Handler.Parse(packet);
+                parsedHere = true;
+                MapVisits.NoteDifficulty(packet, MovementHandler.CurrentDifficultyID, CurrentMap);
+                Count(CurrentMap);
+                MapVisits.Count(packet, CurrentMap);
+                return true;
+            }
+
+            if (CreatesObjects.Contains(opcode))
+                MapVisits.NoteUpdate();
+
             Count(CurrentMap);
+            MapVisits.Count(packet, CurrentMap);
 
             if (!Enabled)
                 return true;
