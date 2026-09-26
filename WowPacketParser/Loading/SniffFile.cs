@@ -1402,15 +1402,75 @@ namespace WowPacketParser.Loading
             PacketUpdateObject kept = null;
             foreach (var created in holder.UpdateObject?.Created ?? Enumerable.Empty<CreateObject>())
             {
-                if (created.Spline == null)
+                var spline = CreationSpline(created);
+                if (spline == null)
                     continue;
 
                 kept ??= new PacketUpdateObject { MapId = holder.UpdateObject.MapId };
-                kept.Created.Add(new CreateObject { Guid = created.Guid, CreateType = created.CreateType, Spline = created.Spline });
+                kept.Created.Add(new CreateObject { Guid = created.Guid, CreateType = created.CreateType, Spline = spline });
             }
 
             return kept == null ? null : new PacketHolder { BaseData = holder.BaseData, UpdateObject = kept };
         }
+
+        /// <summary>
+        /// The spline a creature was created on, in whichever of the two shapes its module left it.
+        ///
+        /// The 2.5.1 module and the 1.15.3+ Classic handler build a monster move of their own. Every
+        /// other one - 1.13 to 1.15.2, 3.4.4+, 4.4.2+, MoP and retail - only fills
+        /// Movement.SplineData, which nothing here used to read, so on those builds a creature
+        /// first seen mid-route lost its whole route and its Destination with it.
+        /// </summary>
+        private static PacketMonsterMove CreationSpline(CreateObject created)
+        {
+            if (created.Spline != null)
+                return created.Spline;
+
+            var data = created.Movement?.SplineData;
+            if (data == null)
+                return null;
+
+            var move = new PacketMonsterMove
+            {
+                Mover = created.Movement.Mover ?? created.Guid,
+                Id = (uint)data.Id,
+                Destination = data.Destination,
+                CreationSpline = true
+            };
+
+            if (data.MoveData is { } moveData)
+            {
+                move.Flags = moveData.Flags;
+                move.ElapsedTime = moveData.Elapsed;
+                move.Points.AddRange(moveData.Points);
+                if (moveData.Jump != null)
+                    move.Jump = moveData.Jump;
+
+                switch (moveData.FacingCase)
+                {
+                    case MovementSplineMoveData.FacingOneofCase.LookPosition:
+                        move.LookPosition = moveData.LookPosition;
+                        break;
+                    case MovementSplineMoveData.FacingOneofCase.LookOrientation:
+                        move.LookOrientation = moveData.LookOrientation;
+                        break;
+                    case MovementSplineMoveData.FacingOneofCase.LookTarget:
+                        move.LookTarget = moveData.LookTarget;
+                        break;
+                }
+            }
+
+            return move;
+        }
+
+        /// <summary>
+        /// Spline flags that make a creation spline's points the route itself. Anything else is a
+        /// ground creature's navmesh corridor, the same thing a monster move sends as packed
+        /// deltas and the collector never keeps.
+        /// </summary>
+        private const UniversalSplineFlag WholeRouteSplineFlags =
+            UniversalSplineFlag.Flying | UniversalSplineFlag.CatmullRom | UniversalSplineFlag.Cyclic |
+            UniversalSplineFlag.EnterCycle | UniversalSplineFlag.UncompressedPath;
 
         private const uint UnitFlagInCombat = 0x00080000;
 
@@ -2607,8 +2667,8 @@ namespace WowPacketParser.Loading
                         yield return (holder, holder.MonsterMove);
                     else if (holder.UpdateObject != null)
                         foreach (var created in holder.UpdateObject.Created)
-                            if (created.Spline != null)
-                                yield return (holder, created.Spline);
+                            if (CreationSpline(created) is { } spline)
+                                yield return (holder, spline);
                 }
             }
 
@@ -2622,7 +2682,25 @@ namespace WowPacketParser.Loading
                     InCombat(combat, key, holder.BaseData?.Number ?? 0, holder.BaseData?.Time?.ToDateTime()))
                     continue;
 
-                var points = new List<Vec3>(move.Points);
+                // A monster move's Points are its orders; the corridor went to PackedPoints and stays
+                // out. A creation spline differs by flag. Flying, cyclic or uncompressed, every point
+                // is the route - the 2.5.1 module files a non-cyclic one under PackedPoints, which
+                // cost Kalaran and the Sky Darkeners their flights - and a cyclic one keeps the lap it
+                // repeats at head or tail, because trimming that has cut real points before. On the
+                // ground the points are the corridor and only the Destination below is kept.
+                List<Vec3> points;
+                if (!move.CreationSpline)
+                    points = new List<Vec3>(move.Points);
+                else if ((move.Flags & WholeRouteSplineFlags) != 0)
+                    points = move.PackedPoints.Concat(move.Points).ToList();
+                else
+                {
+                    points = new List<Vec3>();
+                    var corridor = move.Points.Count > 0 ? move.Points : move.PackedPoints;
+                    if (corridor.Count > 0 && (move.Destination == null ||
+                        (move.Destination.X == 0 && move.Destination.Y == 0 && move.Destination.Z == 0)))
+                        points.Add(corridor[corridor.Count - 1]);
+                }
 
                 float? finalOrientation = move.HasLookOrientation ? move.LookOrientation : null;
 

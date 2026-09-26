@@ -137,7 +137,7 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
             WoWObject obj = CoreParsers.UpdateHandler.CreateObject(objType, guid, map, packet);
 
             obj.CreateType = createType;
-            obj.Movement = ReadMovementUpdateBlock(packet, guid, obj, index);
+            obj.Movement = ReadMovementUpdateBlock440(packet, createObject, guid, obj, index);
 
             createObject.Values.Fields = new();
             var updatefieldSize = packet.ReadUInt32();
@@ -309,7 +309,7 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
             return (float)ang;
         }
 
-        private static MovementInfo ReadMovementUpdateBlock(Packet packet, WowGuid guid, WoWObject obj, object index)
+        private static MovementInfo ReadMovementUpdateBlock440(Packet packet, CreateObject createObject, WowGuid guid, WoWObject obj, object index)
         {
             var moveInfo = new MovementInfo();
 
@@ -340,7 +340,7 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
             if (hasMovementUpdate)
             {
                 packet.ResetBitReader();
-                packet.ReadPackedGuid128("MoverGUID", index);
+                var moverGuid = packet.ReadPackedGuid128("MoverGUID", index);
 
                 moveInfo.Flags = (uint)packet.ReadUInt32E<MovementFlag>("Movement Flags", index);
                 moveInfo.Flags2 = (uint)packet.ReadUInt32E<MovementFlag2>("Movement Flags 2", index);
@@ -452,15 +452,20 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
                 if (moveInfo.HasSplineData)
                 {
                     packet.ResetBitReader();
-                    packet.ReadInt32("ID", index);
-                    packet.ReadVector3("Destination", index);
+
+                    // Kept for the waypoint collector, which decides from the flags which points
+                    // are the route. Every point goes to Points; nothing is filtered here.
+                    PacketMonsterMove monsterMove = createObject.Spline = new() { CreationSpline = true };
+                    monsterMove.Mover = moverGuid;
+                    monsterMove.Id = (uint)packet.ReadInt32("ID", index);
+                    monsterMove.Destination = packet.ReadVector3("Destination", index);
 
                     var hasMovementSplineMove = packet.ReadBit("MovementSplineMove", index);
                     if (hasMovementSplineMove)
                     {
                         packet.ResetBitReader();
 
-                        packet.ReadUInt32E<SplineFlag>("SplineFlags", index);
+                        monsterMove.Flags = packet.ReadUInt32E<SplineFlag>("SplineFlags", index).ToUniversal();
                         packet.ReadInt32("Elapsed", index);
                         packet.ReadUInt32("Duration", index);
                         packet.ReadSingle("DurationModifier", index);
@@ -498,10 +503,10 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
                                 orientation = GetAngle(moveInfo.Position.X, moveInfo.Position.Y, faceSpot.X, faceSpot.Y);
                                 break;
                             case 2:
-                                packet.ReadPackedGuid128("FaceGUID", index);
+                                monsterMove.LookTarget = new() { Target = packet.ReadPackedGuid128("FaceGUID", index) };
                                 break;
                             case 3:
-                                orientation = packet.ReadSingle("FaceDirection", index);
+                                monsterMove.LookOrientation = orientation = packet.ReadSingle("FaceDirection", index);
                                 break;
                             default:
                                 break;
@@ -511,15 +516,13 @@ namespace WowPacketParserModule.V4_4_0_54481.Parsers
                             packet.ReadUInt32("SpecialTime", index);
 
                         for (var i = 0; i < pointsCount; ++i)
-                        {
-                            var spot = packet.ReadVector3("Points", index, i);
-                        }
+                            monsterMove.Points.Add(packet.ReadVector3("Points", index, i));
 
                         if (hasSpellEffectExtraData)
                             MovementHandler.ReadMonsterSplineSpellEffectExtraData(packet, index);
 
                         if (hasJumpExtraData)
-                            MovementHandler.ReadMonsterSplineJumpExtraData(packet, index);
+                            monsterMove.Jump = MovementHandler.ReadMonsterSplineJumpExtraData(packet, index);
 
                         if (hasAnimationTierTransition)
                         {
